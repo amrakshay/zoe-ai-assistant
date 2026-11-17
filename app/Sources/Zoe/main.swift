@@ -69,6 +69,33 @@ if let i = args.firstIndex(of: "--smoke") {
     exit(ok ? 0 : 1)
 }
 
+// MARK: - speech-to-text bench
+
+if let i = args.firstIndex(of: "--stt-bench") {
+    // Loads Whisper (timed), then transcribes a 16 kHz mono WAV if given. Prints time, CPU and peak RSS.
+    let wav = i + 1 < args.count ? args[i + 1] : nil
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        let stt = WhisperSTT()
+        do {
+            try await stt.load()
+            print(String(format: "load: %.0f ms", await stt.lastLoadMillis))
+            if let wav {
+                let samples = try WAV.read16kMono(URL(fileURLWithPath: wav))
+                for n in 1...2 {
+                    let r = try await stt.transcribe(samples)
+                    print(String(format: "transcribe #%d (%.2f s audio): %.0f ms: %@", n, Double(samples.count) / 16000, r.millis, r.text))
+                }
+            }
+        } catch { print("error: \(error)") }
+        var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
+        print(String(format: "cpu %.2f s, max RSS %.0f MB", Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6, Double(ru.ru_maxrss) / 1048576))
+        done.signal()
+    }
+    done.wait()
+    exit(0)
+}
+
 // MARK: - listen test
 
 if let i = args.firstIndex(of: "--listen-test") {
@@ -77,9 +104,10 @@ if let i = args.firstIndex(of: "--listen-test") {
         let v = VoiceController()
         v.onStatus = { print("voice: \($0)") }
         v.onUIState = { print("state: \($0)") }
-        v.onTurn = { s in
-            print(String(format: "turn: %.2f s of audio", Double(s.count) / 16000))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { v.replyFinished() }
+        v.onTurn = { s in print(String(format: "turn: %.2f s of audio", Double(s.count) / 16000)) }
+        v.onTranscript = { text, ms in
+            print(String(format: "transcript (%.0f ms): %@", ms, text))
+            if !text.isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { v.replyFinished() } }
         }
         Task { @MainActor in
             await v.start()
@@ -138,12 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .inCall: self.statusItem.button?.title = "Zoe ☎︎"
             }
         }
-        voice.onTurn = { [weak self] samples in
-            // Until Whisper lands (#4): report what was heard and carry on.
-            let secs = Double(samples.count) / 16000
-            self?.voiceItem.title = String(format: "Voice: heard %.1f s of audio (speech-to-text comes in #4)", secs)
-            print(String(format: "turn: %.2f s of audio", secs))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.voice.replyFinished() }
+        voice.onTranscript = { [weak self] text, ms in
+            guard let self, !text.isEmpty else { return }
+            self.voiceItem.title = "You: \(text)"
+            print(String(format: "transcript (%.0f ms): %@", ms, text))
+            self.counter += 1
+            self.link.send(CoreMessage("utterance", ["id": "u\(self.counter)", "text": text, "trigger": "ptt"]))
         }
         Task { await voice.start() }
     }
@@ -171,7 +199,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handle(_ m: CoreMessage) {
         switch m.type {
-        case "say": replyItem.title = m.string("text") ?? ""
+        case "say":
+            if let t = m.string("text"), !t.isEmpty { replyItem.title = t }
+            // Until Zoe speaks (#5): the reply is done when its final chunk arrives.
+            if (m["final"] as? Bool) == true { voice.replyFinished() }
         case "state": print("assistant state: \(m.string("value") ?? "?")")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break

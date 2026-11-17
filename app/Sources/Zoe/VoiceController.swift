@@ -7,8 +7,14 @@ import ZoeKit
 final class VoiceController {
     var onUIState: ((TurnMachine.UIState) -> Void)?
     var onStatus: ((String) -> Void)?
-    /// A finished turn: 16 kHz mono samples. #4 transcribes it.
+    /// A finished turn: 16 kHz mono samples (before transcription).
     var onTurn: (([Float]) -> Void)?
+    /// The transcript of a turn ("" if nothing was said) and how long Whisper took.
+    var onTranscript: ((String, Double) -> Void)?
+    let stt = WhisperSTT()
+    private var unloadTask: Task<Void, Never>?
+    /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
+    var unloadAfter: Duration = .seconds(120)
 
     private var machine = TurnMachine()
     private let audio = AudioEngine()
@@ -68,6 +74,28 @@ final class VoiceController {
             Task { @MainActor [weak self] in self?.handle(.tick(Self.now())) }
         }
         onStatus?("Hold right ⌥ to talk, or tap it for a conversation")
+        prepareSpeechModelIfNeeded()
+    }
+
+    /// The first load compiles Whisper for the Neural Engine (minutes). Do it now, in the background,
+    /// rather than in the first conversation; a turn that arrives meanwhile waits for the same load.
+    private func prepareSpeechModelIfNeeded() {
+        Task { [stt, weak self] in
+            guard await !stt.isPrepared else { return }
+            await MainActor.run { self?.onStatus?("Preparing the speech model (one time, a few minutes)…") }
+            do {
+                let t0 = Date()
+                try await stt.load()          // may join a load a conversation already started
+                let ms = Date().timeIntervalSince(t0) * 1000
+                await MainActor.run {
+                    guard let self else { return }
+                    self.onStatus?(String(format: "Speech model ready (prepared in %.0f s)", ms / 1000))
+                    if !self.audio.isRunning { Task { await self.stt.unload() } }
+                }
+            } catch {
+                await MainActor.run { self?.onStatus?("Speech model unavailable: \(error)") }
+            }
+        }
     }
 
     /// Click on the character or the menu item.
@@ -87,6 +115,15 @@ final class VoiceController {
         case .chime(let c):
             NSSound(named: c == .start ? "Tink" : "Pop")?.play()
         case .startEngine:
+            unloadTask?.cancel()
+            Task { [stt, weak self] in        // load Whisper while I'm still speaking
+                do {
+                    let wasLoaded = await stt.isLoaded
+                    try await stt.load { p in Task { @MainActor in self?.onStatus?(String(format: "Downloading the speech model… %.0f %%", p * 100)) } }
+                    if !wasLoaded { let ms = await stt.lastLoadMillis; await MainActor.run { self?.onStatus?(String(format: "speech model loaded in %.0f ms", ms)) } }
+                }
+                catch { await MainActor.run { self?.onStatus?("Speech model unavailable: \(error)") } }
+            }
             do {
                 try audio.start(voiceProcessing: ProcessInfo.processInfo.environment["ZOE_VP"] == "1")
                 audio.samplesQueue.async { [listener] in listener?.begin() }
@@ -99,11 +136,27 @@ final class VoiceController {
         case .stopEngine:
             audio.stop()
             audio.samplesQueue.async { [listener] in listener?.pause() }
+            unloadTask?.cancel()
+            unloadTask = Task { [stt, unloadAfter] in
+                try? await Task.sleep(for: unloadAfter)
+                if !Task.isCancelled { await stt.unload() }
+            }
         case .endTurn:
             audio.samplesQueue.async { [listener, weak self] in
                 guard let samples = listener?.takeTurn() else { return }
                 listener?.pause()      // half-duplex until the reply is done (barge-in comes with #5)
-                Task { @MainActor in self?.onTurn?(samples) }
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.onTurn?(samples)
+                    do {
+                        let r = try await self.stt.transcribe(samples)
+                        self.onTranscript?(r.text, r.millis)
+                        if r.text.isEmpty { self.replyFinished() }   // nothing said: keep listening
+                    } catch {
+                        self.onStatus?("Couldn't transcribe: \(error.localizedDescription)")
+                        self.replyFinished()
+                    }
+                }
             }
         case .discardTurn:
             audio.samplesQueue.async { [listener] in listener?.clear() }

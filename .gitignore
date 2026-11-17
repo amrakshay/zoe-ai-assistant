@@ -1,0 +1,53 @@
+# Build output (as in maclens)
+.build/
+.selftest/
+*.app
+dist/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# --- Feasibility spikes: keep code, scripts and reports; leave out data, binaries and third-party clones ---
+
+# Audio: synthetic test clips and recordings of my own voice (personal, large)
+*.wav
+*.srt
+
+# Models: downloaded by the spike scripts (Whisper ~2 GB; openWakeWord models are CC BY-NC-SA, not ours to redistribute)
+feasibility/spikes/f04-stt/whisper_models/
+*.onnx
+*.mlmodelc/
+
+# Raw spike outputs: logs, per-run transcripts and score dumps (may contain local account details and work content)
+*.log
+*.jsonl
+*.time
+feasibility/spikes/f01-sdk/out/
+feasibility/spikes/f02-gate/logs/
+feasibility/spikes/f02-gate/repo/
+feasibility/spikes/f04-stt/own_voice*/whisper/
+feasibility/spikes/f04-stt/own_voice*/manifest.tsv
+feasibility/spikes/f05-wake/results/*_scores.json
+feasibility/spikes/f05-wake/audio/
+feasibility/spikes/f03-echo/*_meta.json
+feasibility/spikes/f03-echo/run1/
+feasibility/spikes/f06-rive/results/*.png
+
+# Third-party clones used for comparison (fetch them again with the commands in the reports)
+feasibility/spikes/f05-wake/ext/
+
+# Nested git metadata from spike scaffolding
+feasibility/spikes/*/.git/
+
+# Compiled spike binaries (rebuild with swiftc / swift build)
+feasibility/spikes/f03-echo/f03
+feasibility/spikes/f04-stt/stt
+feasibility/spikes/f07-macos/ctx
+feasibility/spikes/f07-macos/micgrab
+feasibility/spikes/f07-macos/paste
+feasibility/spikes/f07-macos/pbinfo
+feasibility/spikes/f07-macos/procaudio
+feasibility/spikes/f07-macos/ptt
+feasibility/spikes/f07-macos/hotkey
+feasibility/spikes/f07-macos/axmanual

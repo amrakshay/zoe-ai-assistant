@@ -1,0 +1,29 @@
+SpeechTranscriber.isAvailable = true
+SpeechTranscriber.supportedLocales (30): de-AT de-CH de-DE en-AU en-CA en-GB en-IE en-IN en-NZ en-SG en-US en-ZA es-CL es-ES es-MX es-US fr-BE fr-CA fr-CH fr-FR it-CH it-IT ja-JP ko-KR pt-BR pt-PT yue-CN zh-CN zh-HK zh-TW
+SpeechTranscriber.installedLocales: en-AU en-CA en-GB en-IE en-IN en-NZ en-SG en-US en-ZA
+DictationTranscriber.supportedLocales (54): ar-SA ca-ES cs-CZ da-DK de-AT de-CH de-DE el-GR en-AU en-CA en-GB en-IE en-IN en-NZ en-SG en-US en-ZA es-CL es-ES es-MX es-US fi-FI fr-BE fr-CA fr-CH fr-FR he-IL hi-IN hr-HR hu-HU id-ID it-CH it-IT ja-JP ko-KR ms-MY nb-NO nl-BE nl-NL pl-PL pt-BR pt-PT ro-RO ru-RU sk-SK sv-SE th-TH tr-TR uk-UA vi-VN yue-CN zh-CN zh-HK zh-TW
+DictationTranscriber.installedLocales: en-IN en-US
+en-US: ST equiv=en-US status=supported | DT equiv=en-US status=supported | SF available=true onDevice=true
+  ST best format: <AVAudioFormat 0x782c88320:  1 ch,  16000 Hz, Int16>
+en-IN: ST equiv=en-IN status=supported | DT equiv=en-IN status=supported | SF available=true onDevice=true
+  ST best format: <AVAudioFormat 0x782c88370:  1 ch,  16000 Hz, Int16>
+2026-11-16 18:52:44.218 stt[4182:63921126] No Assistant asset for language en-GB
+en-GB: ST equiv=en-GB status=supported | DT equiv=en-GB status=supported | SF available=true onDevice=false
+  ST best format: <AVAudioFormat 0x782c88320:  1 ch,  16000 Hz, Int16>
+2026-11-16 18:52:44.229 stt[4182:63921150] No Assistant asset for language hi-IN
+hi-IN: ST equiv=hi-IN status=unsupported | DT equiv=hi-IN status=supported | SF available=true onDevice=false
+AssetInventory.maximumReservedLocales = 5
+AssetInventory.reservedLocales = []
+SFSpeechRecognizer.authorizationStatus = 0 (0=notDetermined 1=denied 2=restricted 3=authorized)
+ST en-US: downloading... (progress total=0)
+ST en-US: installed in 735 ms
+ST en-US: status now installed
+DT en-US: downloading... (progress total=0)
+DT en-US: installed in 697 ms
+DT en-US: status now installed
+ST en-IN: downloading... (progress total=0)
+ST en-IN: installed in 4 ms
+ST en-IN: status now installed
+DT en-IN: downloading... (progress total=0)
+DT en-IN: installed in 675 ms
+DT en-IN: status now installed

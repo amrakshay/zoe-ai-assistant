@@ -1,0 +1,23 @@
+[project]
+name = "f01-sdk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "amrakshay" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.2.182",
+]
+
+[project.scripts]
+f01-sdk = "f01_sdk:main"
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"

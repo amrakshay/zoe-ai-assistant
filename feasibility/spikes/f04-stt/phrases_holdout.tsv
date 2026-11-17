@@ -1,0 +1,15 @@
+h01	move PRJ-21604 to in review
+h02	what did Priya say in Slack about the collector
+h03	open the Grafana dashboard for runtime manager
+h04	are any Kubernetes pods restarting on alpha
+h05	summarise the last three comments on the merge request
+h06	check if the Helm chart change is in the release branch
+h07	add a Jira comment saying the fix is deployed
+h08	is the Databricks job still running
+h09	search Confluence for the ArgoCD runbook
+h10	who is on call in PagerDuty today
+h11	start a local review before I push
+h12	draft a reply saying I'll join the CCB late
+h13	how much disk is left on the Postgres volume
+h14	pause for ten minutes
+h15	what's blocking the ATLAS release

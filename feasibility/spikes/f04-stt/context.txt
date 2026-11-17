@@ -1,0 +1,15 @@
+Jira
+MR
+merge request
+Databricks
+PRJ-21499
+GitLab
+Grafana
+Kubernetes
+ArgoCD
+collector
+CCB
+hash collector dev
+bulk push batching
+Slack
+pods

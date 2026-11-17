@@ -1,0 +1,12 @@
+baseline-ca-anim             cpu=     0%  rss_mean=   34 MB  rss_max=   35 MB  footprint=9281 KB  fps=n/a  windowserver=46.66%
+baseline-ca-paused           cpu=     0%  rss_mean=   35 MB  rss_max=   35 MB  footprint=9233 KB  fps=n/a  windowserver=23.33%
+baseline-timer-30            cpu=   .30%  rss_mean=   32 MB  rss_max=   35 MB  footprint=9457 KB  fps=n/a  windowserver=40.00%
+baseline-timer-10            cpu=   .13%  rss_mean=   33 MB  rss_max=   35 MB  footprint=9537 KB  fps=n/a  windowserver=16.66%
+marty-default                cpu= 10.46%  rss_mean=   51 MB  rss_max=   51 MB  footprint=127 MB  fps=119.6  windowserver=46.66%
+marty-fps30                  cpu=  4.06%  rss_mean=   42 MB  rss_max=   51 MB  footprint=126 MB  fps=29.9  windowserver=23.33%
+marty-fps10                  cpu=  1.76%  rss_mean=   50 MB  rss_max=   51 MB  footprint=126 MB  fps=9.8  windowserver=13.33%
+marty-paused                 cpu=     0%  rss_mean=   51 MB  rss_max=   51 MB  footprint=25 MB  fps=0.0  windowserver=16.66%
+mouth-talk-default           cpu= 12.70%  rss_mean=   52 MB  rss_max=   53 MB  footprint=128 MB  fps=119.8  windowserver=46.66%
+mouth-talk-fps30             cpu=  4.20%  rss_mean=   52 MB  rss_max=   52 MB  footprint=126 MB  fps=30.0  windowserver=30.00%
+mouth-talk-fps10             cpu=  2.10%  rss_mean=   44 MB  rss_max=   44 MB  footprint=126 MB  fps=9.9  windowserver=13.33%
+mouth-paused                 cpu=     0%  rss_mean=   52 MB  rss_max=   52 MB  footprint=25 MB  fps=0.0  windowserver=6.66%

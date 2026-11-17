@@ -1,0 +1,629 @@
+<title>Desk Assistant Flows</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a scaled macOS desktop on the left where the flow plays out; a scenario rail on the right with what you do, what you see, and what runs under the hood. */
+:root {
+  --bg: #eef0f4;
+  --surface: #ffffff;
+  --surface-2: #f6f7fa;
+  --fg: #171a21;
+  --muted: #5d6474;
+  --line: #dde1e8;
+  --accent: #2f62e0;
+  --accent-soft: #e4ebfd;
+  --run: #2f62e0;
+  --wait: #d98a00;
+  --done: #2a9a58;
+  --fail: #d1453b;
+  --away: #8a90a0;
+  --wall-a: #9fb6e8;
+  --wall-b: #e8c3c9;
+  --wall-c: #f3dfc3;
+  --glass: rgba(255,255,255,.86);
+  --glass-line: rgba(20,24,33,.10);
+  --glass-fg: #171a21;
+  --glass-muted: #5d6474;
+  --char-body: #f2a65e;
+  --char-shade: #d9853b;
+  --char-ink: #2a1d12;
+  --excluded: #b9bfcc;
+  --shadow: 0 10px 30px rgba(20,24,40,.18), 0 2px 6px rgba(20,24,40,.10);
+  --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --f-mac: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12141a; --surface: #1b1e26; --surface-2: #222630; --fg: #e9ecf2; --muted: #9aa2b2; --line: #2e3340;
+    --accent: #7ea0ff; --accent-soft: #24304f; --run: #7ea0ff; --wait: #f0b23a; --done: #4cc47f; --fail: #ef6f66; --away: #7d8495;
+    --wall-a: #26335a; --wall-b: #4a2f45; --wall-c: #5a4530;
+    --glass: rgba(34,37,46,.88); --glass-line: rgba(255,255,255,.10); --glass-fg: #eef0f5; --glass-muted: #a7aebd;
+    --char-body: #f0a35c; --char-shade: #c97a33; --char-ink: #2a1d12; --excluded: #4a505e;
+    --shadow: 0 10px 30px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12141a; --surface: #1b1e26; --surface-2: #222630; --fg: #e9ecf2; --muted: #9aa2b2; --line: #2e3340;
+  --accent: #7ea0ff; --accent-soft: #24304f; --run: #7ea0ff; --wait: #f0b23a; --done: #4cc47f; --fail: #ef6f66; --away: #7d8495;
+  --wall-a: #26335a; --wall-b: #4a2f45; --wall-c: #5a4530;
+  --glass: rgba(34,37,46,.88); --glass-line: rgba(255,255,255,.10); --glass-fg: #eef0f5; --glass-muted: #a7aebd;
+  --char-body: #f0a35c; --char-shade: #c97a33; --char-ink: #2a1d12; --excluded: #4a505e;
+  --shadow: 0 10px 30px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); line-height: 1.5; }
+.wrap { max-width: 1440px; margin: 0 auto; padding-block: 20px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 16px; }
+header.top h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(1.4rem, 2.4vw, 1.9rem); margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+header.top p { margin: 0; color: var(--muted); max-width: 70ch; font-size: .92rem; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+@media (max-width: 1080px) { .layout { grid-template-columns: minmax(0,1fr); } }
+
+/* Scenario tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tab { font: 500 .82rem var(--f-body); border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.tab:hover { border-color: var(--accent); }
+.tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tab:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Stage */
+.stage { position: relative; width: 100%; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: var(--wall-a); }
+.desk { position: absolute; left: 0; top: 0; width: 1000px; height: 625px; transform-origin: 0 0; font-family: var(--f-mac); color: var(--glass-fg);
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-b), transparent 60%), radial-gradient(90% 80% at 100% 100%, var(--wall-c), transparent 60%), linear-gradient(160deg, var(--wall-a), var(--wall-b)); }
+.menubar { position: absolute; inset: 0 0 auto 0; height: 26px; display: flex; align-items: center; gap: 16px; padding: 0 14px; font-size: 12.5px; background: var(--glass); border-bottom: 1px solid var(--glass-line); }
+.menubar .sp { flex: 1; }
+.menubar b { font-weight: 600; }
+.mb-icon { display: inline-flex; align-items: center; gap: 4px; }
+.mb-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--char-body); box-shadow: inset 0 -2px 0 var(--char-shade); }
+.mb-badge { font-size: 10px; font-weight: 600; background: var(--run); color: #fff; border-radius: 6px; padding: 0 5px; }
+.mb-badge.wait { background: var(--wait); }
+
+/* Background app windows */
+.appwin { position: absolute; left: 40px; top: 52px; width: 560px; height: 380px; border-radius: 10px; background: var(--glass); border: 1px solid var(--glass-line); box-shadow: var(--shadow); overflow: hidden; transition: opacity .25s; }
+.appwin .bar { height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid var(--glass-line); font-size: 12px; color: var(--glass-muted); }
+.appwin .bar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; background: var(--line); }
+.appwin .bar i:nth-child(1){ background:#ee6a5f } .appwin .bar i:nth-child(2){ background:#f5bd4f } .appwin .bar i:nth-child(3){ background:#61c454 }
+.appwin .bar span { margin-left: 8px; }
+.appwin .body { padding: 14px 16px; font-size: 13px; }
+.msg { display: grid; grid-template-columns: 28px 1fr; gap: 8px; margin-bottom: 12px; }
+.av { width: 28px; height: 28px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 600; font-size: 12px; }
+.msg .who { font-weight: 600; font-size: 12.5px; } .msg .who small { color: var(--glass-muted); font-weight: 400; margin-left: 6px; }
+.compose { position: absolute; left: 16px; right: 16px; bottom: 14px; border: 1px solid var(--glass-line); border-radius: 8px; padding: 9px 11px; font-size: 13px; color: var(--glass-muted); background: var(--surface); min-height: 40px; }
+.compose.filled { color: var(--glass-fg); border-color: var(--accent); }
+.term { background: #0f1218; color: #d8dde8; height: calc(100% - 30px); padding: 12px 14px; font: 12px/1.55 var(--f-mono); }
+.term .p { color: #7ee2a8; } .term .d { color: #8b93a6; }
+.sel { background: rgba(47,98,224,.22); border-radius: 3px; }
+
+/* Character */
+.char { position: absolute; width: 84px; height: 84px; cursor: grab; touch-action: none; user-select: none; z-index: 30; }
+.char:active { cursor: grabbing; }
+.char svg { width: 84px; height: 84px; overflow: visible; display: block; filter: drop-shadow(0 6px 10px rgba(0,0,0,.18)); }
+.char .bodyg { transform-origin: 50px 92px; animation: breathe 3.6s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.025, .975); } }
+.char .eyes { transition: transform .25s; }
+.char .eye { transform-box: fill-box; transform-origin: center; animation: blink 5s infinite; }
+@keyframes blink { 0%, 95%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+.char .mouth { transform-box: fill-box; transform-origin: center; transition: transform .2s; }
+.char .halo { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.char .dots, .char .hand, .char .phones, .char .zz { opacity: 0; transition: opacity .2s; }
+.char[data-state="listening"] .halo { opacity: 1; animation: pulse 1.2s ease-out infinite; }
+@keyframes pulse { from { transform: scale(.9); opacity: .9; } to { transform: scale(1.35); opacity: 0; } }
+.char[data-state="listening"] .eye { transform: scale(1.12); }
+.char[data-state="thinking"] .eyes { transform: translate(3px, -3px); }
+.char[data-state="thinking"] .dots { opacity: 1; }
+.char[data-state="thinking"] .dots circle { animation: dot 1.1s infinite; }
+.char[data-state="thinking"] .dots circle:nth-child(2) { animation-delay: .18s; } .char[data-state="thinking"] .dots circle:nth-child(3) { animation-delay: .36s; }
+@keyframes dot { 50% { transform: translateY(-3px); opacity: .4; } }
+.char[data-state="talking"] .mouth { animation: talk .22s ease-in-out infinite alternate; }
+@keyframes talk { from { transform: scaleY(.35); } to { transform: scaleY(1.25); } }
+.char[data-hand="1"] .hand { opacity: 1; }
+.char[data-hand="1"] .hand { animation: wave 1.4s ease-in-out infinite; transform-origin: 82px 60px; }
+@keyframes wave { 50% { transform: rotate(-12deg); } }
+.char[data-quiet="1"] .phones { opacity: 1; }
+.char[data-quiet="1"] .mouth { transform: scaleY(.3); }
+.char.drop-hover svg { filter: drop-shadow(0 0 0 transparent) drop-shadow(0 0 12px var(--accent)); }
+@media (prefers-reduced-motion: reduce) { .char *, .ring { animation: none !important; } }
+
+/* Activity ring */
+.ring { position: absolute; left: -18px; top: -18px; width: 120px; height: 120px; pointer-events: none; }
+.ring.spin { animation: spin 9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.rdot { position: absolute; left: 54px; top: 54px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--glass); }
+.rdot.run { background: var(--run); } .rdot.wait { background: var(--wait); animation: blinkdot 1s infinite; } .rdot.done { background: var(--done); } .rdot.fail { background: var(--fail); } .rdot.away { background: var(--away); }
+@keyframes blinkdot { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--wait) 35%, transparent); } }
+.badge { position: absolute; right: -6px; top: -6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--run); color: #fff; font: 600 12px/22px var(--f-mac); text-align: center; border: 2px solid var(--glass); cursor: pointer; z-index: 2; }
+.badge.wait { background: var(--wait); }
+
+/* Bubble + panels */
+.bubble { position: absolute; max-width: 300px; background: var(--glass); border: 1px solid var(--glass-line); color: var(--glass-fg); border-radius: 14px; padding: 9px 12px; font-size: 13px; line-height: 1.4; box-shadow: var(--shadow); z-index: 25; }
+.bubble.you { background: var(--accent); color: #fff; border-color: transparent; }
+.bubble .tag { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; opacity: .75; margin-bottom: 2px; }
+.panel { position: absolute; width: 380px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 12px; box-shadow: var(--shadow); z-index: 20; overflow: hidden; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.panel.wide { width: 520px; }
+.panel h4 { margin: 0; font-size: 13.5px; font-weight: 600; padding: 11px 14px 0; display: flex; align-items: center; gap: 8px; }
+.panel .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--glass-muted); font-weight: 600; }
+.panel .pb { padding: 8px 14px 12px; font-size: 12.5px; }
+.panel .pb p { margin: 0 0 6px; }
+.panel ul { margin: 0; padding-left: 16px; } .panel li { margin-bottom: 3px; }
+.panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.panel th, .panel td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--glass-line); }
+.panel th { color: var(--glass-muted); font-weight: 500; }
+.panel .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
+.pbtn { font: 500 12px var(--f-mac); border-radius: 7px; padding: 5px 11px; border: 1px solid var(--glass-line); background: var(--surface); color: var(--glass-fg); cursor: pointer; }
+.pbtn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pbtn.danger { color: var(--fail); }
+.pbtn:hover { filter: brightness(1.05); }
+.quote { border-left: 3px solid var(--accent); padding: 6px 9px; background: var(--surface-2); border-radius: 0 6px 6px 0; margin: 6px 0; }
+.hint { color: var(--glass-muted); font-size: 11.5px; }
+.opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--glass-line); border-radius: 7px; margin-bottom: 5px; cursor: pointer; background: var(--surface); }
+.opt:hover { border-color: var(--accent); }
+.srow { display: grid; grid-template-columns: 12px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--glass-line); }
+.srow:last-child { border-bottom: 0; }
+.srow .sd { width: 10px; height: 10px; border-radius: 50%; }
+.srow .st { font-size: 11px; color: var(--glass-muted); }
+.srow .tt { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat { height: 300px; overflow: auto; padding: 8px 14px; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
+.cm { max-width: 85%; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); }
+.cm.me { align-self: flex-end; background: var(--accent); color: #fff; }
+.cm .via { font-size: 10px; opacity: .7; display: block; }
+.cm.tool { align-self: stretch; max-width: 100%; font: 11px var(--f-mono); color: var(--glass-muted); background: transparent; border: 1px dashed var(--glass-line); }
+.chatin { margin: 0 14px 12px; border: 1px solid var(--glass-line); border-radius: 8px; padding: 7px 10px; color: var(--glass-muted); font-size: 12.5px; background: var(--surface); }
+.toast { position: absolute; right: 16px; top: 38px; width: 300px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 12.5px; z-index: 22; }
+.toast b { display: block; margin-bottom: 2px; }
+.quietpill { position: absolute; z-index: 26; font-size: 11px; font-weight: 600; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 999px; padding: 2px 8px; color: var(--glass-muted); }
+.dropfile { position: absolute; z-index: 40; display: flex; align-items: center; gap: 6px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 8px; padding: 6px 10px; font-size: 12px; box-shadow: var(--shadow); transition: left .9s cubic-bezier(.4,.1,.2,1), top .9s cubic-bezier(.4,.1,.2,1), opacity .3s; }
+
+/* Controls under stage */
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.ctl { font: 500 .85rem var(--f-body); border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+.ctl.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ctl:disabled { opacity: .45; cursor: default; }
+.progress { display: flex; gap: 4px; flex: 1; min-width: 120px; }
+.progress span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.progress span.on { background: var(--accent); }
+.kbd { color: var(--muted); font-size: .8rem; }
+
+/* Rail */
+.rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.card h2 { font-family: var(--f-display); font-size: 1.15rem; margin: 0 0 4px; font-weight: 700; text-wrap: balance; }
+.card h3 { font-size: .95rem; margin: 0 0 6px; }
+.stepno { font-family: var(--f-mono); font-size: .78rem; color: var(--accent); }
+.say { font-size: .95rem; margin: 6px 0 0; }
+.say .you { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 6px; padding: 1px 7px; font-weight: 500; }
+.hood { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hood li { display: grid; grid-template-columns: 62px minmax(0,1fr) auto; gap: 8px; align-items: baseline; font-size: .82rem; }
+.lane { font: 500 .68rem var(--f-mono); text-transform: uppercase; letter-spacing: .04em; border-radius: 5px; padding: 1px 6px; text-align: center; }
+.lane.app { background: var(--accent-soft); color: var(--accent); }
+.lane.core { background: color-mix(in srgb, var(--done) 16%, transparent); color: var(--done); }
+.lane.claude { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--excluded) 45%, transparent) 0 4px, transparent 4px 8px); color: var(--muted); }
+.lane.os { background: var(--surface-2); color: var(--muted); }
+.ms { font: .74rem var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ms.ok { color: var(--done); }
+.note { font-size: .78rem; color: var(--muted); margin: 8px 0 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .78rem; color: var(--muted); }
+.legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Desk Assistant: how it all fits together</h1>
+    <p>An interactive mock of the planned Mac assistant. Pick a flow, then step through it. You can drag the character, click it to wake it, or drop a real file on it. All data shown is example data, and the timings are the plan's targets, not measurements.</p>
+  </header>
+
+  <div class="layout">
+    <section aria-label="Mock desktop">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="stage" id="stage">
+        <div class="desk" id="desk">
+          <div class="menubar">
+            <b>Finder</b><span>File</span><span>Edit</span><span>View</span><span class="sp"></span>
+            <span class="mb-icon" title="Assistant menu"><span class="mb-dot"></span><span class="mb-badge" id="mbBadge" hidden>0</span></span>
+            <span id="mbClock">Mon 16 Nov 09:05</span>
+          </div>
+          <div class="appwin" id="appwin" hidden></div>
+          <div class="toast" id="toast" hidden></div>
+          <div class="panel" id="panel" hidden></div>
+          <div class="bubble" id="bubble" hidden></div>
+          <div class="quietpill" id="quietpill" hidden>Quiet mode · text only</div>
+          <div class="dropfile" id="dropfile" hidden>📄 <span id="dropname">collector-2026-11-16.log</span></div>
+          <div class="char" id="char" data-state="idle" tabindex="0" role="button" aria-label="Assistant character. Click to wake, drag to move.">
+            <div class="ring" id="ring"></div>
+            <div class="badge" id="badge" hidden>0</div>
+            <svg viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="halo" cx="50" cy="56" r="40" fill="none" stroke="var(--accent)" stroke-width="3"/>
+              <g class="bodyg">
+                <path d="M50 16 C75 16 88 36 88 58 C88 80 72 92 50 92 C28 92 12 80 12 58 C12 36 25 16 50 16 Z" fill="var(--char-body)"/>
+                <path d="M20 70 C26 86 40 92 50 92 C66 92 80 84 86 68 C78 80 64 86 50 86 C36 86 26 80 20 70 Z" fill="var(--char-shade)"/>
+                <g class="eyes"><ellipse class="eye" cx="38" cy="52" rx="5" ry="6.5" fill="var(--char-ink)"/><ellipse class="eye" cx="62" cy="52" rx="5" ry="6.5" fill="var(--char-ink)"/></g>
+                <ellipse cx="29" cy="63" rx="5" ry="3" fill="#e9785f" opacity=".45"/><ellipse cx="71" cy="63" rx="5" ry="3" fill="#e9785f" opacity=".45"/>
+                <ellipse class="mouth" cx="50" cy="68" rx="6" ry="3.6" fill="var(--char-ink)"/>
+                <g class="phones"><path d="M18 52 C18 26 82 26 82 52" fill="none" stroke="var(--char-ink)" stroke-width="4" stroke-linecap="round"/><rect x="11" y="48" width="10" height="16" rx="4" fill="var(--char-ink)"/><rect x="79" y="48" width="10" height="16" rx="4" fill="var(--char-ink)"/></g>
+              </g>
+              <g class="dots" fill="var(--glass-fg)"><circle cx="70" cy="10" r="3"/><circle cx="80" cy="6" r="3"/><circle cx="90" cy="2" r="3"/></g>
+              <g class="hand"><path d="M84 66 C92 58 94 46 92 38" stroke="var(--char-shade)" stroke-width="7" stroke-linecap="round" fill="none"/><circle cx="92" cy="34" r="7" fill="var(--char-body)" stroke="var(--char-shade)" stroke-width="2"/></g>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="ctl" id="prev" type="button">← Back</button>
+        <button class="ctl primary" id="next" type="button">Next →</button>
+        <div class="progress" id="progress" aria-hidden="true"></div>
+        <span class="kbd">Arrow keys work too</span>
+      </div>
+    </section>
+
+    <aside class="rail" aria-live="polite">
+      <div class="card">
+        <div class="eyebrow">Flow</div>
+        <h2 id="flowTitle"></h2>
+        <p class="note" id="flowWhy" style="margin-top:2px"></p>
+      </div>
+      <div class="card">
+        <div class="stepno" id="stepNo"></div>
+        <h3 id="stepTitle" style="margin-top:4px"></h3>
+        <div class="say" id="stepSay"></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Under the hood</div>
+        <ul class="hood" id="hood"></ul>
+        <p class="note">Target timings from the plan's speed budget. Claude Code's own time is shown hatched and is outside the budget.</p>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Activity ring</div>
+        <div class="legend">
+          <span><i style="background:var(--run)"></i>running</span>
+          <span><i style="background:var(--wait)"></i>waiting for you</span>
+          <span><i style="background:var(--away)"></i>open elsewhere</span>
+          <span><i style="background:var(--done)"></i>finished</span>
+          <span><i style="background:var(--fail)"></i>failed</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- Example content ----------
+  const SLACK = { kind: 'slack', title: 'Slack — #collector-dev', body: `
+    <div class="msg"><div class="av">RK</div><div><div class="who">Sam K<small>10:42</small></div><span class="sel">Is the bulk-push batching fix going into Thursday's release, or does it need another review round?</span></div></div>
+    <div class="msg"><div class="av">MS</div><div><div class="who">Meera S<small>10:44</small></div>+1, QA wants to know by EOD.</div></div>`, compose: 'Message #collector-dev' };
+  const TERM = { kind: 'term', title: 'Terminal — collector job worktree', term: `<span class="p">$</span> claude --resume 7f3c2a9e-review-branch\n<span class="d">Resuming "Local review: bulk-push batching" (12 messages)…</span>\n\n<span class="d">●</span> Review round 2 complete. 2 should-fix findings remain.\n\n<span class="p">&gt;</span> █` };
+  const CAL = { kind: 'cal', title: 'Calendar', body: `<div class="msg"><div class="av">10</div><div><div class="who">Sprint review<small>10:00–10:45</small></div>In progress · Google Meet</div></div>` };
+
+  const R = (id, title, state, extra='') => ({ id, title, state, extra });
+
+  const FLOWS = [
+    { id: 'voice', name: 'Ask by voice', why: 'The basic loop: wake word, speech, Claude Code, spoken answer. One new session is created and indexed.', steps: [
+      { t: 'Idle', say: 'Nothing is happening. Only the tiny wake-word model listens; the character breathes at about 10 fps.', st: 'idle',
+        hood: [['app','Wake word model on mic frames (≈200 KB model)','≤2% CPU'],['core','Child process, waiting on stdin','≈0% CPU']] },
+      { t: 'You say “Hey Claude”', say: '<span class="you">“Hey Claude”</span> A chime plays at once and the character starts listening. A second check runs while you talk and quietly cancels if it was a false fire.', st: 'listening',
+        hood: [['app','Wake word fires → chime + listening','≤150 ms'],['app','Second-pass check while listening','cancels on false fire']] },
+      { t: 'You ask a question', say: '<span class="you">“What’s on my calendar this afternoon?”</span> Live text appears as you speak. A pause of about 0.7 s ends your turn.', st: 'listening', you: 'What’s on my calendar this afternoon?',
+        hood: [['os','SpeechAnalyzer streams partial text','live'],['app','Silero VAD detects end of speech','≈0.7 s pause'],['app','Final transcript ready','≤250 ms']] },
+      { t: 'It acknowledges and thinks', say: 'It says a short cached “On it” at once while Claude Code works. No session is active, so a local rule starts a new one in the assistant folder, with no extra Claude call.', st: 'thinking', bubble: 'On it.',
+        hood: [['app','Cached generic acknowledgement spoken','≤300 ms'],['core','Local router: no active session → new, home folder','≤20 ms'],['core','SDK query sent','≤50 ms'],['claude','Calendar connector call + reasoning','excluded']] },
+      { t: 'It answers out loud', say: 'Speech starts on the first sentence while the rest is still streaming. The mouth follows the voice.', st: 'talking', bubble: 'Two things this afternoon: Design sync at 3:00 and Sprint planning at 4:30. You’re free until 3.',
+        hood: [['claude','Answer streams back','excluded'],['app','Sentence buffer → AVSpeechSynthesizer','≤100 ms to first audio']] },
+      { t: 'Conversation ends', say: 'After about 20 s of silence (or “bye”) it goes back to idle. Claude writes a one-line summary into the session index.', st: 'idle',
+        hood: [['core','Index: “Afternoon calendar check”, 2 turns','SQLite'],['app','State = idle, back to ~10 fps','']] },
+    ]},
+    { id: 'show', name: 'Show me', why: 'When an answer is long or visual, Claude draws a panel instead of reading it out.', steps: [
+      { t: 'You ask for a list', say: '<span class="you">“Hey Claude, show my open tickets.”</span>', st: 'listening', you: 'Show my open tickets.',
+        hood: [['app','Wake → transcript','≤400 ms'],['core','Local router: active session (12 min) → continue','≤20 ms']] },
+      { t: 'It thinks', say: 'Claude Code queries Jira through your connector.', st: 'thinking', bubble: 'One sec.',
+        hood: [['claude','Jira search via connector','excluded']] },
+      { t: 'It draws a table and says one line', say: 'Five rows would be tiring to hear, so Claude calls the <code>show_table</code> tool. Drawing panels is allowed without asking.', st: 'talking', bubble: 'Five open tickets, two in review. They’re on screen.',
+        panel: { kind: 'table', title: 'My open tickets', label: 'Panel · show_table', cols: ['Key','Summary','Status'], rows: [['PRJ-10421','Bulk push batching','In review'],['PRJ-10388','Collector form toggles','In progress'],['PRJ-10402','Agent lifecycle status','In review'],['PRJ-10417','Prod-host warning copy','To do'],['PRJ-10430','Genie token usage','To do']], actions: [['Open in Jira',''],['Close','']] },
+        hood: [['core','ui.show_table → app (allowlisted)','≤50 ms to draw'],['app','Native table panel','']] },
+    ]},
+    { id: 'approve', name: 'Approve a write', why: 'Anything that sends, posts, edits or deletes waits for your yes, by voice or by click.', steps: [
+      { t: 'You ask it to post', say: '<span class="you">“Tell #collector-dev the build is green.”</span>', st: 'listening', you: 'Tell #collector-dev the build is green.',
+        hood: [['app','Transcript','≤250 ms'],['core','Router: continue','']] },
+      { t: 'Claude drafts the message', say: 'Claude writes the message and tries to call the Slack send tool.', st: 'thinking', bubble: 'Drafting it…',
+        hood: [['claude','Composes message, calls slack_send_message','excluded'],['core','PreToolUse gate: not on the exact-name allowlist → ask','runs before settings allow rules']] },
+      { t: 'It asks you first', say: 'The card is built by the core from the tool’s actual input, so it shows exactly what will be sent. Say “yes” after the question, or click Approve. No answer in 15 s means no.', st: 'talking', hand: true, bubble: 'Send to #collector-dev: “Build 1.42 is green, all checks passed”?',
+        panel: { kind: 'approval', title: 'Send a Slack message?', label: 'Approval', html: '<p>To <b>#collector-dev</b></p><div class="quote">Build 1.42 is green, all checks passed. ✅</div><p class="hint">Shown exactly as the tool will send it. Say “yes” or “no” after the question, or click. Times out as No in 15 s.</p>', actions: [['Approve','next','primary'],['Deny','','danger'],['Edit text','']] },
+        hood: [['core','Card rendered from tool name + raw input','not from Claude'],['app','Card + spoken summary','≤50 ms']] },
+      { t: 'Approved and sent', say: 'You clicked Approve (or said yes). The send runs, and the action is logged for your end-of-day wrap.', st: 'talking', bubble: 'Sent.',
+        hood: [['core','Answer via click after 1.8 s → allow','actions table'],['claude','Slack send','excluded']] },
+    ]},
+    { id: 'job', name: 'Background job', why: 'Long work runs in its own Claude Code session in the right repo while you keep talking.', steps: [
+      { t: 'You hand off a job', say: '<span class="you">“Run the local review on my collector branch.”</span> The router recognises a job and picks the repo by alias.', st: 'listening', you: 'Run the local review on my collector branch.',
+        hood: [['claude','Calls start_job','excluded'],['core','Repo from alias “collector”','local']] },
+      { t: 'You click to start it', say: 'Starting a job needs a click; a spoken yes isn’t enough for this one.', st: 'talking', hand: true, bubble: 'Start a background review in the collector repo? Click Start.',
+        panel: { kind: 'approval', title: 'Start a background job?', label: 'Approval · click required', html: '<p><b>Local review</b> of the current branch</p><p class="hint">Runs in its own git worktree of acme-collector, so your working copy isn’t touched.<br>Allowed: edits inside the worktree, git status/diff/log/add/commit. Never: .claude/, .git/, CLAUDE.md.<br>Push, MR, Slack and Jira need your click.</p>', actions: [['Start','next','primary'],['Cancel','']] },
+        hood: [['core','start_job → gate: click only','voice not accepted']] },
+      { t: 'It runs; you keep talking', say: 'A blue dot orbits the character and the badge shows 1. You can ask something else meanwhile.', st: 'talking', ring: ['run'], badge: 1, bubble: 'Started. I’ll tell you when it’s done.',
+        hood: [['core','git worktree created; SDK session (kind = job) in it','index row'],['claude','Review skill runs','excluded']] },
+      { t: 'Meanwhile, another question', say: '<span class="you">“When’s my next meeting?”</span> Answered in your main session; the job keeps going.', st: 'talking', ring: ['run'], badge: 1, bubble: 'Design sync at 3:00, in 40 minutes.',
+        hood: [['core','Main session, unaffected by the job','']] },
+      { t: 'The job finishes', say: 'The dot flashes green and a nudge appears. It speaks only if you’re not busy.', st: 'idle', ring: ['done'], badge: 0,
+        toast: '<b>Review finished · collector</b>2 should-fix findings, record committed.<div class="actions" style="padding:8px 0 0"><button class="pbtn primary" data-act="goto:sessions:1">Open chat</button><button class="pbtn" data-act="goto:sessions:2">Open in Terminal</button></div>',
+        hood: [['core','Job done → nudge (priority normal)','batched'],['app','Green dot for 10 s','']] },
+    ]},
+    { id: 'needs', name: 'When it needs you', why: 'Questions, sign-ins and passwords that voice can’t handle. Every card also offers Open full session.', steps: [
+      { t: 'Two jobs running', say: 'Two background jobs are running.', st: 'idle', ring: ['run','run'], badge: 2,
+        hood: [['core','2 jobs, cap = 2','']] },
+      { t: 'A job has a question', say: 'One job asks which branch to compare against. Its dot turns amber, the badge turns amber, and the character raises its hand.', st: 'idle', hand: true, ring: ['wait','run'], badge: 1, badgeWait: true,
+        toast: '<b>Review job is waiting for you</b>It has a question about the target branch.<div class="actions" style="padding:8px 0 0"><button class="pbtn primary" data-act="next">Answer</button></div>',
+        hood: [['claude','AskUserQuestion','excluded'],['core','pending_input: question (job paused)','4 h timeout']] },
+      { t: 'You answer with a click (or voice)', say: 'The question appears as choices. It’s also read out, so you could just say “release”.', st: 'talking', hand: true, ring: ['wait','run'], badge: 1, badgeWait: true, bubble: 'Compare against main or the release branch?',
+        panel: { kind: 'choices', title: 'Which branch should the review compare against?', label: 'Question from a job', html: '<div class="opt" data-act="next">◯ <b>release/1.42</b> <span class="hint">Thursday’s release</span></div><div class="opt" data-act="next">◯ <b>main</b></div><div class="opt">◯ Other… <span class="hint">type or say it</span></div>', actions: [['Open full session','goto:sessions:1']] },
+        hood: [['app','Choices panel + spoken question','']] },
+      { t: 'A connector needs signing in', say: 'Voice can’t do an OAuth sign-in. The card opens the right place, and the turn continues without Slack meanwhile.', st: 'talking', ring: ['run','run'], badge: 2, bubble: 'Slack needs reconnecting. I’ll carry on without it.',
+        panel: { kind: 'auth', title: 'Slack needs reconnecting', label: 'Sign-in needed', html: '<p>Your Slack connector’s sign-in has expired.</p><p class="hint">Sign in again in the connector settings, or run <code>/mcp</code> in a terminal.</p>', actions: [['Open connector settings','','primary'],['Open in Terminal',''],['Continue without','']] },
+        hood: [['core','Tool error: auth required → pending_input: auth','']] },
+      { t: 'A command wants a password', say: 'Commands run without a terminal, so they fail fast instead of hanging. You run it yourself; passwords are never spoken or typed into the assistant.', st: 'talking', ring: ['run','run'], badge: 2, bubble: 'That needs your GitLab login. I’ve opened it in a terminal for you.',
+        panel: { kind: 'auth', title: 'Needs your login', label: 'Interactive command', html: '<div class="quote" style="font-family:var(--f-mono);font-size:11.5px">glab auth login</div><p class="hint">Run this yourself, then click Continue.</p>', actions: [['Open in Terminal','','primary'],['Continue','']] },
+        hood: [['claude','Bash: glab asks for a token → fails (no terminal)','excluded'],['core','pending_input: interactive','']] },
+    ]},
+    { id: 'this', name: 'This + dictate', why: 'It knows what you’re looking at, drafts a reply, and pastes it. It never presses Send.', steps: [
+      { t: 'You’re reading a Slack thread', say: 'You’ve selected Sam’s question in Slack.', st: 'idle', app: SLACK,
+        hood: [['app','Nothing runs until you speak','']] },
+      { t: 'You hold push-to-talk', say: 'Holding right ⌥ instead of saying “Hey Claude” (handy in an office). <span class="you">“Draft a reply to this: yes, it’s going in Thursday.”</span>', st: 'listening', app: SLACK, you: 'Draft a reply to this: yes, it’s going in Thursday.',
+        hood: [['app','Push-to-talk → listening','≤50 ms'],['app','Context: Slack, #collector-dev, selected text','Accessibility API']] },
+      { t: 'It drafts', say: 'The selected text goes along as context. Claude writes the reply.', st: 'thinking', app: SLACK,
+        hood: [['core','Utterance + context_snapshot','text only'],['core','Turn marked tainted (screen text)','web calls now ask'],['claude','Draft reply','excluded']] },
+      { t: 'You check the draft', say: 'The draft opens in a card. Paste puts it into the Slack box you were in.', st: 'talking', app: SLACK, bubble: 'Here’s a draft.',
+        panel: { kind: 'draft', title: 'Draft reply', label: 'Draft', html: '<div class="quote">Yes, the bulk-push batching fix is going into Thursday’s release. Review round 2 is done; I’ll confirm with QA by EOD.</div>', actions: [['Paste','next','primary'],['Edit',''],['Discard','']] },
+        hood: [['app','Draft panel','']] },
+      { t: 'Pasted, not sent', say: 'The text is in Slack’s message box. You read it and press Enter yourself.', st: 'idle', app: Object.assign({}, SLACK, { compose: 'Yes, the bulk-push batching fix is going into Thursday’s release. Review round 2 is done; I’ll confirm with QA by EOD.', filled: true }),
+        hood: [['app','Re-check Slack is still frontmost','asks again if not'],['app','Strip trailing newline, ⌘V, restore clipboard','never presses Send']] },
+    ]},
+    { id: 'morning', name: 'Morning + quiet', why: 'It speaks up when useful and stays silent when you’re busy.', steps: [
+      { t: 'First wake of the day', say: '<span class="you">“Hey Claude, morning.”</span> The morning briefing runs: a short spoken summary and the detail in a card.', st: 'talking', clock: 'Mon 16 Nov 09:05', bubble: 'Morning. Three meetings, two reviews waiting on you, and one failed pipeline on your MR.',
+        panel: { kind: 'card', title: 'Monday briefing', label: 'Briefing', wide: true, html: '<ul><li><b>Meetings:</b> Sprint review 10:00, Design sync 15:00, Sprint planning 16:30</li><li><b>Reviews waiting on you:</b> 2 MRs (collector, SDK)</li><li><b>Your MRs:</b> pipeline failed on bulk-push batching (unit tests)</li><li><b>Slack:</b> 3 mentions, 1 DM</li><li><b>Email:</b> 1 marked important (release CCB)</li></ul>', actions: [['Fix the pipeline as a job',''],['Open MRs',''],['Close','']] },
+        hood: [['core','briefings.morning (uses your morning skill)','once a day'],['claude','Calendar, Jira, GitLab, Slack, Gmail reads','excluded']] },
+      { t: 'A meeting starts', say: 'At 10:00 another app starts using the mic, so it stops its own audio entirely (no wake word, no speech) and switches to text only. Headphones on.', st: 'idle', quiet: true, clock: 'Mon 16 Nov 10:02', app: CAL,
+        hood: [['app','Another process capturing input → audio engine stopped','per-process detection'],['core','Quiet rules: in call → text only','']] },
+      { t: 'Something happens mid-meeting', say: 'A watcher sees a new review request. It shows a bubble only; nothing is spoken.', st: 'idle', quiet: true, clock: 'Mon 16 Nov 10:20', app: CAL, bubble: 'Review requested on “SDK asset tags” (normal priority).',
+        hood: [['core','Watcher: GitLab review requested','direct API poll'],['core','Nudge → bubble only (quiet)','batched']] },
+      { t: 'You type instead of talking', say: 'Click the bubble and type. Replies come back as text while quiet mode is on.', st: 'thinking', quiet: true, clock: 'Mon 16 Nov 10:21', app: CAL, you: 'add it to my todo for after lunch',
+        hood: [['app','text_input','typed'],['core','capture.add_todo (allowlisted)','vault inbox']] },
+    ]},
+    { id: 'drop', name: 'Drop a file', why: 'Drag a file, screenshot, URL or text onto the character. Try it with a real file from your computer.', steps: [
+      { t: 'You drag a log onto it', say: 'Drag any file onto the character. In this mock you can drop a real file; nothing is uploaded.', st: 'idle', drop: 'start',
+        hood: [['app','Drop target highlights','']] },
+      { t: 'It asks what to do', say: 'It wakes and asks. <span class="you">“Find the error.”</span>', st: 'listening', drop: 'end', bubble: 'Got collector-2026-11-16.log. What should I do with it?', dropBubble: true,
+        hood: [['app','dropped {kind: file, path}','path only, no upload'],['core','New session; turn tainted (dropped file)','web calls now ask']] },
+      { t: 'It answers in a card', say: 'Claude reads the file and points at the cause.', st: 'talking', bubble: 'Found it: the token expired at 09:14 and every push after that failed.',
+        panel: { kind: 'card', title: 'collector-2026-11-16.log', label: 'Finding', html: '<p><b>401 Unauthorized</b> from the bulk-push endpoint starting 09:14:07, 212 times.</p><div class="quote" style="font-family:var(--f-mono);font-size:11px">09:14:07 ERROR push_batch: 401 token expired (tenant t-42)</div><p class="hint">Likely cause: the service token wasn’t refreshed after rotation.</p>', actions: [['Open full session',''],['Close','']] },
+        hood: [['claude','Read + grep the log','excluded']] },
+    ]},
+    { id: 'sessions', name: 'Sessions + handoff', why: 'See every session and open one in Terminal, or later as a full chat. The desktop app can’t open these sessions today, so that option is gone.', steps: [
+      { t: 'Click the badge', say: 'Three sessions are active. Clicking the ring or badge opens the Sessions panel.', st: 'idle', ring: ['run','wait','run'], badge: 1, badgeWait: true, hand: true,
+        panel: { kind: 'sessions', title: 'Sessions', label: 'Sessions', wide: true, rows: [R(1,'Local review: bulk-push batching','wait','collector · 18 min'),R(2,'Fix pipeline: unit tests','run','collector · 6 min'),R(3,'Morning conversation','run','voice-assistant · now'),R(4,'Afternoon calendar check','done','yesterday'),R(5,'Genie token usage notes','done','Fri')], actions: [['Open chat (later phase)','next','primary'],['Open in Terminal','goto:sessions:2'],['Cancel job','','danger']] },
+        hood: [['core','sessions_activity','from SQLite index']] },
+      { t: 'Open as a full chat', say: 'The built-in chat window shows the whole transcript: your voice turns, typed turns and tool calls. You can keep typing or talking.', st: 'idle', ring: ['run','wait','run'], badge: 1, badgeWait: true,
+        panel: { kind: 'chat', title: 'Local review: bulk-push batching', label: 'Chat window (later phase)', wide: true, msgs: [['me','Run the local review on my collector branch','voice'],['tool','Bash  git diff origin/release/1.42...HEAD  (allowed: job git allowlist)'],['ai','Round 1: 4 findings. 2 blocking, 2 should-fix. Fixing the blocking ones.'],['tool','Edit  push_batch.py  (allowed inside the job worktree)'],['ai','Which branch should the review compare against?'],['me','release/1.42','click']] , actions: [['Open in Terminal','next'],['Close','']] },
+        hood: [['app','Chat window from the live stream + transcript file','≤150 ms']] },
+      { t: 'Open in Terminal', say: 'Terminal opens in the repo with <code>claude --resume</code>. The session’s dot turns grey: it’s handed off, so the assistant won’t write to it.', st: 'idle', ring: ['run','away','run'], badge: 2, app: TERM,
+        hood: [['app','Terminal: claude --resume <id>','in the repo folder'],['core','Session marked handed_off','no two writers']] },
+      { t: 'Take it back (it forks)', say: 'Nothing comes back automatically, because an idle terminal still owns the session. Choosing Take back forks it: the terminal keeps the original and the assistant continues on the copy.', st: 'idle', ring: ['run','run','run','away'], badge: 3,
+        hood: [['core','Take back → fork_session','terminal keeps the original'],['core','New index row, forked_from = original','']] },
+    ]},
+  ];
+
+  // ---------- Elements ----------
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), desk = $('desk'), ch = $('char'), ring = $('ring'), badge = $('badge'), bubble = $('bubble'), panel = $('panel'), toast = $('toast'), appwin = $('appwin'), quietpill = $('quietpill'), dropfile = $('dropfile');
+  let flowIdx = 0, stepIdx = 0, scale = 1;
+  let pos = { x: 860, y: 470 };
+
+  // ---------- Scaling ----------
+  function fit() {
+    scale = stage.clientWidth / 1000;
+    desk.style.transform = `scale(${scale})`;
+    stage.style.height = (625 * scale) + 'px';
+  }
+  new ResizeObserver(fit).observe(stage);
+
+  // ---------- Tabs ----------
+  const tabs = $('tabs');
+  FLOWS.forEach((f, i) => {
+    const b = document.createElement('button');
+    b.className = 'tab'; b.type = 'button'; b.setAttribute('role', 'tab'); b.textContent = f.name; b.id = 'tab-' + f.id;
+    b.addEventListener('click', () => go(i, 0));
+    tabs.appendChild(b);
+  });
+
+  // ---------- Rendering ----------
+  function placeChar() {
+    ch.style.left = pos.x + 'px'; ch.style.top = pos.y + 'px';
+    const leftSide = pos.x > 480;
+    // bubble
+    if (!bubble.hidden) {
+      const bw = Math.min(300, bubble.offsetWidth || 300);
+      let bx = leftSide ? pos.x - bw - 12 : pos.x + 96;
+      let by = pos.y - 10 - (bubble.offsetHeight || 40);
+      if (by < 34) by = pos.y + 90;
+      bubble.style.left = Math.max(8, Math.min(1000 - bw - 8, bx)) + 'px';
+      bubble.style.top = Math.max(32, by) + 'px';
+    }
+    if (!panel.hidden) {
+      const pw = panel.offsetWidth || 380, ph = panel.offsetHeight || 220;
+      let px = leftSide ? pos.x - pw - 24 : pos.x + 108;
+      let py = Math.min(625 - ph - 12, Math.max(34, pos.y - ph + 60));
+      if (!bubble.hidden && leftSide) { const bt = parseFloat(bubble.style.top); if (bt + bubble.offsetHeight > py && bt < py + ph) py = Math.max(34, bt - ph - 10); if (py < 34) { py = 34; } }
+      panel.style.left = Math.max(8, Math.min(1000 - pw - 8, px)) + 'px';
+      panel.style.top = py + 'px';
+    }
+    quietpill.style.left = (pos.x - 20) + 'px'; quietpill.style.top = (pos.y + 92) + 'px';
+  }
+
+  function renderRing(dots) {
+    ring.innerHTML = '';
+    (dots || []).forEach((s, i, a) => {
+      const d = document.createElement('div');
+      const ang = (360 / Math.max(a.length, 1)) * i - 90;
+      d.className = 'rdot ' + s;
+      d.style.transform = `rotate(${ang}deg) translate(58px) rotate(${-ang}deg)`;
+      ring.appendChild(d);
+    });
+    ring.classList.toggle('spin', (dots || []).includes('run'));
+  }
+
+  function actionButtons(list) {
+    return '<div class="actions">' + list.map(([label, act, cls]) => `<button class="pbtn ${cls || ''}" type="button" data-act="${act || 'none'}">${label}</button>`).join('') + '</div>';
+  }
+
+  const dotColor = { run: 'var(--run)', wait: 'var(--wait)', done: 'var(--done)', away: 'var(--away)', fail: 'var(--fail)' };
+  const stateLabel = { run: 'running', wait: 'waiting for you', done: 'finished', away: 'open elsewhere', fail: 'failed' };
+
+  function renderPanel(p) {
+    if (!p) { panel.hidden = true; return; }
+    panel.classList.toggle('wide', !!p.wide || p.kind === 'chat');
+    let body = '';
+    if (p.kind === 'table') {
+      body = `<div class="pb" style="overflow-x:auto"><table><thead><tr>${p.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${p.rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    } else if (p.kind === 'sessions') {
+      body = `<div class="pb">${p.rows.map(r => `<div class="srow"><span class="sd" style="background:${dotColor[r.state]}"></span><div style="min-width:0"><div class="tt">${r.title}</div><div class="st">${r.extra}</div></div><span class="st">${stateLabel[r.state]}</span></div>`).join('')}</div>`;
+    } else if (p.kind === 'chat') {
+      body = `<div class="chat">${p.msgs.map(([who, text, via]) => who === 'tool' ? `<div class="cm tool">${text}</div>` : `<div class="cm ${who === 'me' ? 'me' : ''}">${via ? `<span class="via">${via === 'voice' ? 'said' : 'clicked'}</span>` : ''}${text}</div>`).join('')}</div><div class="chatin">Type a message, or hold ⌥ to talk…</div>`;
+    } else {
+      body = `<div class="pb">${p.html}</div>`;
+    }
+    panel.innerHTML = `<h4><span>${p.title}</span></h4><div class="pb" style="padding-top:2px;padding-bottom:0"><span class="kind">${p.label || ''}</span></div>${body}${p.actions ? actionButtons(p.actions) : ''}`;
+    panel.hidden = false;
+  }
+
+  function renderApp(a) {
+    if (!a) { appwin.hidden = true; return; }
+    if (a.kind === 'term') {
+      appwin.innerHTML = `<div class="bar"><i></i><i></i><i></i><span>${a.title}</span></div><pre class="term" style="margin:0;white-space:pre-wrap">${a.term}</pre>`;
+    } else {
+      appwin.innerHTML = `<div class="bar"><i></i><i></i><i></i><span>${a.title}</span></div><div class="body">${a.body}</div>${a.compose ? `<div class="compose ${a.filled ? 'filled' : ''}">${a.compose}</div>` : ''}`;
+    }
+    appwin.hidden = false;
+  }
+
+  function render() {
+    const flow = FLOWS[flowIdx], s = flow.steps[stepIdx];
+    [...tabs.children].forEach((b, i) => b.setAttribute('aria-selected', i === flowIdx ? 'true' : 'false'));
+    $('flowTitle').textContent = flow.name;
+    $('flowWhy').textContent = flow.why;
+    $('stepNo').textContent = `Step ${stepIdx + 1} of ${flow.steps.length}`;
+    $('stepTitle').textContent = s.t;
+    $('stepSay').innerHTML = s.say;
+    $('hood').innerHTML = (s.hood || []).map(([lane, text, ms]) => `<li><span class="lane ${lane}">${lane === 'claude' ? 'claude' : lane}</span><span>${text}</span><span class="ms ${/^≤|≈0|^live/.test(ms || '') ? 'ok' : ''}">${ms || ''}</span></li>`).join('');
+    $('progress').innerHTML = flow.steps.map((_, i) => `<span class="${i <= stepIdx ? 'on' : ''}"></span>`).join('');
+    $('prev').disabled = flowIdx === 0 && stepIdx === 0;
+    $('next').textContent = (stepIdx === flow.steps.length - 1) ? (flowIdx === FLOWS.length - 1 ? 'Start over' : 'Next flow →') : 'Next →';
+
+    ch.dataset.state = s.st || 'idle';
+    ch.dataset.hand = s.hand ? '1' : '0';
+    ch.dataset.quiet = s.quiet ? '1' : '0';
+    quietpill.hidden = !s.quiet;
+    $('mbClock').textContent = s.clock || 'Mon 16 Nov 14:20';
+
+    renderRing(s.ring);
+    const n = s.badge || 0;
+    badge.hidden = !n; badge.textContent = n; badge.classList.toggle('wait', !!s.badgeWait);
+    const mb = $('mbBadge'); mb.hidden = !n; mb.textContent = n; mb.classList.toggle('wait', !!s.badgeWait);
+
+    if (s.you) { bubble.className = 'bubble you'; bubble.innerHTML = `<span class="tag">${s.quiet ? 'You typed' : 'You said'}</span>${s.you}`; bubble.hidden = false; }
+    else if (s.bubble) { bubble.className = 'bubble'; bubble.innerHTML = s.bubble; bubble.hidden = false; }
+    else bubble.hidden = true;
+
+    if (s.toast) { toast.innerHTML = s.toast; toast.hidden = false; } else toast.hidden = true;
+    renderApp(s.app);
+    renderPanel(s.panel);
+
+    // drop animation
+    if (s.drop === 'start') {
+      dropfile.hidden = false; dropfile.style.opacity = 1; dropfile.style.left = '120px'; dropfile.style.top = '520px';
+      requestAnimationFrame(() => setTimeout(() => { dropfile.style.left = (pos.x + 10) + 'px'; dropfile.style.top = (pos.y + 30) + 'px'; }, 250));
+      setTimeout(() => ch.classList.add('drop-hover'), 900);
+    } else { dropfile.hidden = true; ch.classList.remove('drop-hover'); }
+
+    requestAnimationFrame(placeChar);
+  }
+
+  function go(f, s) {
+    flowIdx = (f + FLOWS.length) % FLOWS.length; stepIdx = s;
+    try { localStorage.setItem('dam-pos', JSON.stringify(pos)); } catch (e) {}
+    if (location.hash !== '#' + FLOWS[flowIdx].id) history.replaceState(null, '', '#' + FLOWS[flowIdx].id);
+    render();
+  }
+  function next() {
+    const flow = FLOWS[flowIdx];
+    if (stepIdx < flow.steps.length - 1) go(flowIdx, stepIdx + 1);
+    else go(flowIdx + 1, 0);
+  }
+  function prev() {
+    if (stepIdx > 0) go(flowIdx, stepIdx - 1);
+    else if (flowIdx > 0) go(flowIdx - 1, FLOWS[flowIdx - 1].steps.length - 1);
+  }
+  $('next').addEventListener('click', next);
+  $('prev').addEventListener('click', prev);
+  document.addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input,textarea')) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  });
+
+  // Buttons inside panels / toasts
+  desk.addEventListener('click', e => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act;
+    if (act === 'next') next();
+    else if (act.startsWith('goto:')) { const [, id, st] = act.split(':'); const i = FLOWS.findIndex(f => f.id === id); if (i >= 0) go(i, +st); }
+  });
+  badge.addEventListener('click', e => { e.stopPropagation(); go(FLOWS.findIndex(f => f.id === 'sessions'), 0); });
+
+  // ---------- Drag + click on character ----------
+  let drag = null;
+  ch.addEventListener('pointerdown', e => {
+    if (e.target === badge) return;
+    drag = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, moved: false };
+    ch.setPointerCapture(e.pointerId);
+  });
+  ch.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    pos.x = Math.max(4, Math.min(1000 - 90, drag.ox + dx));
+    pos.y = Math.max(32, Math.min(625 - 90, drag.oy + dy));
+    placeChar();
+  });
+  ch.addEventListener('pointerup', () => {
+    if (drag && !drag.moved) go(0, 1); // click = wake
+    else { try { localStorage.setItem('dam-pos', JSON.stringify(pos)); } catch (e) {} }
+    drag = null;
+  });
+  ch.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(0, 1); } });
+
+  // ---------- Real file drop ----------
+  ['dragenter', 'dragover'].forEach(ev => ch.addEventListener(ev, e => { e.preventDefault(); ch.classList.add('drop-hover'); }));
+  ch.addEventListener('dragleave', () => ch.classList.remove('drop-hover'));
+  ch.addEventListener('drop', e => {
+    e.preventDefault(); ch.classList.remove('drop-hover');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    const name = f ? f.name : 'dropped item';
+    const flow = FLOWS.find(x => x.id === 'drop');
+    flow.steps[1].bubble = `Got ${name.replace(/[<>&]/g, '')}. What should I do with it?`;
+    $('dropname').textContent = name;
+    go(FLOWS.indexOf(flow), 1);
+  });
+  desk.addEventListener('dragover', e => e.preventDefault());
+  desk.addEventListener('drop', e => e.preventDefault());
+
+  // ---------- Start ----------
+  try { const saved = JSON.parse(localStorage.getItem('dam-pos') || 'null'); if (saved && typeof saved.x === 'number') pos = saved; } catch (e) {}
+  const start = FLOWS.findIndex(f => '#' + f.id === location.hash);
+  window.addEventListener('hashchange', () => { const i = FLOWS.findIndex(f => '#' + f.id === location.hash); if (i >= 0 && i !== flowIdx) go(i, 0); });
+  fit();
+  go(start >= 0 ? start : 0, 0);
+})();
+</script>

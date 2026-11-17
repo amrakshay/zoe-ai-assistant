@@ -1,0 +1,15 @@
+p01	what's on my calendar this afternoon
+p02	show my open Jira tickets
+p03	run the local review on the collector branch
+p04	is PRJ-21499 merged
+p05	open the MR for bulk push batching in GitLab
+p06	tell hash collector dev the build is green
+p07	check Grafana for the ArgoCD sync errors
+p08	what's the status of the Databricks workspace collector
+p09	create a merge request for the Kubernetes fix
+p10	when is the next CCB meeting
+p11	summarise my unread Slack messages
+p12	restart the ArgoCD sync for the beta environment
+p13	list the failing pipelines in GitLab
+p14	remind me to review the merge request at five
+p15	how many pods are crashing in the Kubernetes cluster

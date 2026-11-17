@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>local.voice-assistant.f04-stt</string>
+<key>CFBundleName</key><string>f04-stt</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>F04 spike: benchmark on-device speech recognition.</string>
+<key>NSMicrophoneUsageDescription</key><string>F04 spike: record test phrases.</string>
+</dict></plist>

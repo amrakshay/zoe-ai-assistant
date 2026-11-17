@@ -6,6 +6,8 @@ import ZoeKit
 @MainActor
 final class VoiceController {
     var onUIState: ((TurnMachine.UIState) -> Void)?
+    /// Mic level while listening (0…1), on the main actor.
+    var onMicLevel: ((Float) -> Void)?
     var onStatus: ((String) -> Void)?
     /// A finished turn: 16 kHz mono samples (before transcription).
     var onTurn: (([Float]) -> Void)?
@@ -49,6 +51,7 @@ final class VoiceController {
                     }
                 }
             }
+            l.onLevel = { v in Task { @MainActor [weak self] in self?.onMicLevel?(v) } }
             listener = l
             audio.onSamples = { [weak l] s in l?.feed(s) }
         } catch {
@@ -111,7 +114,9 @@ final class VoiceController {
     func click() { triggerAt = Self.now(); handle(.click(triggerAt)) }
 
     /// The reply has been spoken (or shown); in a hands-free conversation Zoe listens again.
-    func replyFinished() { ackTask?.cancel(); handle(.replyFinished(Self.now())) }
+    func replyFinished() { ackTask?.cancel(); onReplyDone?(); handle(.replyFinished(Self.now())) }
+    /// The reply has been spoken (or there was nothing to say).
+    var onReplyDone: (() -> Void)?
 
     /// A sentence of the reply, as it streams from the core.
     func speak(_ text: String) {

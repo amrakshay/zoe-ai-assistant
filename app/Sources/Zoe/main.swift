@@ -128,6 +128,68 @@ if let i = args.firstIndex(of: "--speak-test") {
     NSApplication.shared.run()
 }
 
+// MARK: - UI demo
+
+if args.contains("--ui-demo") {
+    // Cycles the character through its states with fake levels, shows a bubble and a card, and prints
+    // window ids (for `screencapture -l`) and CPU per phase.
+    MainActor.assumeIsolated {
+        let ch = CharacterWindow()
+        let bubble = BubbleWindow(anchor: ch.panel)
+        ch.show()
+        func cpu() -> Double {
+            var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
+            return Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6
+        }
+        Task { @MainActor in
+            print("character window \(ch.panel.windowNumber)")
+            @MainActor func phase(_ name: String, _ secs: Double, level: Bool = false) async {
+                let c0 = cpu(), t0 = Date()
+                print("phase \(name)")
+                var t = 0.0
+                while Date().timeIntervalSince(t0) < secs {
+                    if level { ch.level(Float(0.04 + 0.04 * sin(t * 9) * sin(t * 2.3))) }
+                    try? await Task.sleep(for: .milliseconds(level ? 50 : 500)); t += level ? 0.05 : 0.5
+                }
+                print(String(format: "  %@: cpu %.1f %%", name, (cpu() - c0) / secs * 100))
+                if let dir = ProcessInfo.processInfo.environment["ZOE_DEMO_SHOTS"], bubble.panel.isVisible,
+                   let v = bubble.panel.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                    v.cacheDisplay(in: v.bounds, to: rep)       // the bubble only, never the screen
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/bubble-\(name).png"))
+                }
+            }
+            await phase("idle", 4)
+            ch.state = .listening; await phase("listening", 4, level: true)
+            bubble.showYou("What's on my calendar this afternoon?")
+            ch.state = .thinking; await phase("thinking", 4)
+            ch.state = .talking
+            bubble.appendReply("You have three meetings this afternoon.")
+            bubble.appendReply("The first is a design review at two.")
+            await phase("talking", 4, level: true)
+            bubble.showYou("Which pods are failing in the dev cluster?")
+            bubble.showFullReply("""
+            Two pods are failing, both in the collector service. The details are on screen.
+
+            - **collector-worker-7f9c** is in `CrashLoopBackOff`: it restarted 14 times in the last hour, \
+            each time after an out-of-memory kill.
+            - **collector-api-5d2b** is `Pending`: no node has enough free memory to schedule it.
+
+            Both point at memory. The worker's limit is 512 Mi and it peaks near 600 Mi during bulk pushes.
+            Raising the limit to 1 Gi, or lowering the batch size, should fix the first; the second will \
+            schedule once the cluster has room.
+            """, summarised: true)
+            await phase("card", 4, level: true)
+            ch.state = .offline; bubble.hide(); await phase("offline", 2)
+            ch.state = .idle; await phase("idle-after", 6)
+            var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
+            print(String(format: "max RSS %.0f MB", Double(ru.ru_maxrss) / 1048576))
+            exit(0)
+        }
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.run()
+}
+
 // MARK: - listen test
 
 if let i = args.firstIndex(of: "--listen-test") {
@@ -180,6 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var counter = 0
     private var current: String?       // utterance whose reply is being spoken
     private var dropped: String?       // an interrupted reply: its remaining chunks are ignored
+    private let character = CharacterWindow()
+    private lazy var bubble = BubbleWindow(anchor: character.panel)
+    private let characterItem = NSMenuItem(title: "Hide Character", action: #selector(toggleCharacter), keyEquivalent: "h")
+    private var coreOffline = false
+    private var voiceState: TurnMachine.UIState = .idle
 
     func applicationDidFinishLaunching(_ note: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -191,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(replyItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
+        menu.addItem(characterItem)
         menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
@@ -199,8 +267,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startLink()
         voice.onStatus = { [weak self] s in self?.voiceItem.title = "Voice: \(s)"; print("voice: \(s)") }
+        character.onClick = { [weak self] in self?.voice.click() }
+        character.onMove = { [weak self] in self?.bubble.relayout() }
+        character.show()
+        voice.onMicLevel = { [weak self] v in self?.character.level(v) }
+        voice.speaker.onLevel = { [weak self] v in self?.character.level(v) }
+        voice.onReplyDone = { [weak self] in self?.bubble.replyDone() }
         voice.onUIState = { [weak self] st in
             guard let self else { return }
+            self.voiceState = st
+            self.updateCharacter()
             switch st {
             case .idle: self.statusItem.button?.title = "Zoe ●"
             case .listening: self.statusItem.button?.title = "Zoe 🎙"
@@ -211,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voice.onTranscript = { [weak self] text, ms in
             guard let self, !text.isEmpty else { return }
             self.voiceItem.title = "You: \(text)"
+            self.bubble.showYou(text)
             print(String(format: "transcript (%.0f ms): %@", ms, text))
             self.counter += 1
             self.current = "u\(self.counter)"
@@ -226,6 +303,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func startConversation() { voice.click() }
+
+    @objc private func toggleCharacter() {
+        if character.isVisible { character.hide(); bubble.hide(); characterItem.title = "Show Character" }
+        else { character.show(); characterItem.title = "Hide Character" }
+    }
+
+    /// Character state from the turn machine, the core link, and whether Zoe is talking.
+    private func updateCharacter(talking: Bool = false) {
+        if coreOffline { character.state = .offline; return }
+        switch voiceState {
+        case .idle: character.state = .idle
+        case .listening: character.state = .listening
+        case .thinking: character.state = talking ? .talking : .thinking
+        case .inCall: character.state = .inCall
+        }
+    }
 
     private func startLink() {
         link = CoreLink(command: .development(coreDir: coreDirectory()))
@@ -243,6 +336,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .offline(let why): stateItem.title = "Core: offline — \(why)"; statusItem.button?.title = "Zoe ⊘"
         case .stopped: stateItem.title = "Core: stopped"; statusItem.button?.title = "Zoe ○"
         }
+        if case .offline = s { coreOffline = true } else { coreOffline = false }
+        updateCharacter()
         print("core state: \(s)")
     }
 
@@ -250,9 +345,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch m.type {
         case "say":
             if let id = m.string("utterance_id"), id == dropped { return }
-            if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t) }
+            if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
-        case "state": print("assistant state: \(m.string("value") ?? "?")")
+        case "bubble":
+            if let id = m.string("utterance_id"), id == dropped { return }
+            bubble.showFullReply(m.string("text") ?? "", summarised: (m["summarised"] as? Bool) == true)
+        case "state":
+            if m.string("value") == "talking" { updateCharacter(talking: true) }
+            print("assistant state: \(m.string("value") ?? "?")")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break
         }
@@ -268,7 +368,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         counter += 1
-        link.send(CoreMessage("utterance", ["id": "u\(counter)", "text": field.stringValue, "trigger": "text"]))
+        current = "u\(counter)"
+        bubble.showYou(field.stringValue)
+        link.send(CoreMessage("utterance", ["id": current!, "text": field.stringValue, "trigger": "text"]))
     }
 
     @objc private func restartCore() { link.stop(); startLink() }

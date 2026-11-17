@@ -4,6 +4,10 @@ import Foundation
 /// Call from one queue only (the audio engine's `samplesQueue`).
 public final class Listener: @unchecked Sendable {
     public var onSpeech: (@Sendable (SpeechSegmenter.Event) -> Void)?
+    /// Mic level (RMS of the last ~100 ms, 0…1) while capturing, for the character.
+    public var onLevel: (@Sendable (Float) -> Void)?
+    private var levelSum: Float = 0
+    private var levelCount = 0
 
     private let vad: SileroVAD
     private var segmenter = SpeechSegmenter()
@@ -47,6 +51,11 @@ public final class Listener: @unchecked Sendable {
 
     public func feed(_ samples: [Float]) {
         guard capturing else { return }
+        if let onLevel {
+            for x in samples { levelSum += x * x }
+            levelCount += samples.count
+            if levelCount >= 1600 { onLevel((levelSum / Float(levelCount)).squareRoot()); levelSum = 0; levelCount = 0 }
+        }
         if turn.count < maxTurnSamples { turn.append(contentsOf: samples.prefix(maxTurnSamples - turn.count)) }
         pending.append(contentsOf: samples)
         var used = 0

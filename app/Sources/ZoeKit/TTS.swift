@@ -15,6 +15,8 @@ public final class Speaker {
     public let voice: AVSpeechSynthesisVoice
     /// Called once all queued speech of a reply has played (or right after `stop()`).
     public var onReplyDone: (() -> Void)?
+    /// Output level (RMS, 0…1) while speech plays, about every 20–100 ms, on the main actor.
+    public var onLevel: ((Float) -> Void)?
     /// Milliseconds from a reply's first `enqueue` to its first scheduled buffer; and engine start.
     public private(set) var lastFirstAudioMillis: Double = 0
     public private(set) var lastEngineStartMillis: Double = 0
@@ -159,6 +161,14 @@ public final class Speaker {
         let e = AVAudioEngine(), p = AVAudioPlayerNode()
         e.attach(p)
         e.connect(p, to: e.mainMixerNode, format: f)
+        e.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buf, _ in
+            guard let d = buf.floatChannelData else { return }
+            let n = Int(buf.frameLength)
+            var sum: Float = 0
+            for i in 0..<n { sum += d[0][i] * d[0][i] }
+            let rms = n > 0 ? (sum / Float(n)).squareRoot() : 0
+            MainActor.assumeIsolatedOrHop { [weak self] in self?.onLevel?(rms) }
+        }
         e.prepare()
         do { try e.start() } catch { return nil }
         lastEngineStartMillis = (Self.now() - t0) * 1000
@@ -176,6 +186,7 @@ public final class Speaker {
     }
 
     private func stopEngine() {
+        engine?.mainMixerNode.removeTap(onBus: 0)
         player?.stop(); engine?.stop()
         engine = nil; player = nil; format = nil
     }

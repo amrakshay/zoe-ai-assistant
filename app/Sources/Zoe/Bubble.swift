@@ -97,6 +97,13 @@ final class BubbleWindow {
         relayout()
     }
 
+    /// Live caption while I speak (replaced by Whisper's transcript when the turn ends).
+    func showCaption(_ text: String) {
+        hideTask?.cancel()
+        model = BubbleContent(you: text)
+        relayout()
+    }
+
     /// A streamed sentence of the reply.
     func appendReply(_ sentence: String) {
         hideTask?.cancel()

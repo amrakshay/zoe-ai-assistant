@@ -15,6 +15,10 @@ final class VoiceController {
     var onTranscript: ((String, Double) -> Void)?
     let stt = WhisperSTT()
     let speaker = Speaker()
+    /// Live caption of the current turn (Apple's on-device recogniser; for display only).
+    let captions = LiveCaptions()
+    var onCaption: ((String) -> Void)?
+    private let captionsOn = ProcessInfo.processInfo.environment["ZOE_CAPTIONS"] != "0"
     /// The user talked over a reply (key or click): the app tells the core and drops the rest of it.
     var onInterrupt: (() -> Void)?
     /// Say "On it." if the reply hasn't started this long after the transcript went to the core.
@@ -53,7 +57,9 @@ final class VoiceController {
             }
             l.onLevel = { v in Task { @MainActor [weak self] in self?.onMicLevel?(v) } }
             listener = l
-            audio.onSamples = { [weak l] s in l?.feed(s) }
+            let c = captions
+            audio.onSamples = { [weak l] s in l?.feed(s); c.feed(s) }
+            captions.onText = { [weak self] t in self?.onCaption?(t) }
         } catch {
             onStatus?("Voice unavailable: \(error)")
             return
@@ -170,6 +176,7 @@ final class VoiceController {
                 handle(.endConversationRequested(Self.now()))
             }
         case .stopEngine:
+            captions.end()
             audio.stop()
             audio.samplesQueue.async { [listener] in listener?.pause() }
             unloadTask?.cancel()
@@ -178,6 +185,7 @@ final class VoiceController {
                 if !Task.isCancelled { await stt.unload() }
             }
         case .endTurn:
+            captions.end()
             audio.samplesQueue.async { [listener, weak self] in
                 guard let samples = listener?.takeTurn() else { return }
                 listener?.pause()      // half-duplex until the reply is done (barge-in comes with #5)
@@ -196,8 +204,12 @@ final class VoiceController {
             }
         case .discardTurn:
             audio.samplesQueue.async { [listener] in listener?.clear() }
+            if machine.phase != .idle, captionsOn { captions.begin() }   // a fresh caption for the next turn
         case .setState(let s):
-            if s == .listening { audio.samplesQueue.async { [listener] in listener?.resume() } }
+            if s == .listening {
+                audio.samplesQueue.async { [listener] in listener?.resume() }
+                if captionsOn { captions.begin() }
+            }
             onUIState?(s)
         case .interruptReply:
             ackTask?.cancel()

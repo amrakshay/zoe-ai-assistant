@@ -161,14 +161,7 @@ public final class Speaker {
         let e = AVAudioEngine(), p = AVAudioPlayerNode()
         e.attach(p)
         e.connect(p, to: e.mainMixerNode, format: f)
-        e.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buf, _ in
-            guard let d = buf.floatChannelData else { return }
-            let n = Int(buf.frameLength)
-            var sum: Float = 0
-            for i in 0..<n { sum += d[0][i] * d[0][i] }
-            let rms = n > 0 ? (sum / Float(n)).squareRoot() : 0
-            MainActor.assumeIsolatedOrHop { [weak self] in self?.onLevel?(rms) }
-        }
+        e.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: Self.levelTap { [weak self] rms in self?.onLevel?(rms) })
         e.prepare()
         do { try e.start() } catch { return nil }
         lastEngineStartMillis = (Self.now() - t0) * 1000
@@ -205,6 +198,18 @@ public final class Speaker {
             }
         }
         return r.list
+    }
+
+    /// The tap runs on an audio queue, so its closure must not be main-actor isolated (Swift 6 traps).
+    nonisolated static func levelTap(_ report: @escaping @MainActor @Sendable (Float) -> Void) -> AVAudioNodeTapBlock {
+        { buf, _ in
+            guard let d = buf.floatChannelData else { return }
+            let n = Int(buf.frameLength)
+            var sum: Float = 0
+            for i in 0..<n { sum += d[0][i] * d[0][i] }
+            let rms = n > 0 ? (sum / Float(n)).squareRoot() : 0
+            DispatchQueue.main.async { report(rms) }
+        }
     }
 
     nonisolated static func copy(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer {

@@ -198,6 +198,8 @@ if let i = args.firstIndex(of: "--listen-test") {
         let v = VoiceController()
         v.onStatus = { print("voice: \($0)") }
         v.onUIState = { print("state: \($0)") }
+        nonisolated(unsafe) var firstCaption = true
+        v.onCaption = { t in if firstCaption { firstCaption = false; print("first caption: \(t)") }; FileHandle.standardError.write(Data("caption: \(t)\n".utf8)) }
         v.onTurn = { s in print(String(format: "turn: %.2f s of audio", Double(s.count) / 16000)) }
         v.onTranscript = { text, ms in
             print(String(format: "transcript (%.0f ms): %@", ms, text))
@@ -273,6 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voice.onMicLevel = { [weak self] v in self?.character.level(v) }
         voice.speaker.onLevel = { [weak self] v in self?.character.level(v) }
         voice.onReplyDone = { [weak self] in self?.bubble.replyDone() }
+        voice.onCaption = { [weak self] t in self?.bubble.showCaption(t) }
         voice.onUIState = { [weak self] st in
             guard let self else { return }
             self.voiceState = st

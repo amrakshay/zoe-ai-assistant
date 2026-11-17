@@ -1,0 +1,29 @@
+name: Release
+
+# release-please keeps a "release PR" (version.txt + CHANGELOG.md) up to date from Conventional Commits.
+# Merging it tags vX.Y.Z and creates the GitHub Release.
+# Phase 1 adds a build job here (as in maclens): build the app on macos-26, package Zoe-X.Y.Z.zip + .sha256,
+# attest provenance, upload to the release and update the Homebrew cask. It must live in this same workflow,
+# because releases created with GITHUB_TOKEN don't trigger other workflows.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

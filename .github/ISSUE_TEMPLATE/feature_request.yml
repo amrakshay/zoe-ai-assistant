@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Zoe to do?
+      description: An example of what you'd say and what should happen helps.
+  - type: textarea
+    id: done
+    attributes:
+      label: How will we know it's done?
+      description: Acceptance criteria, e.g. "a Slack send waits for a click".
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Design constraints
+      options:
+        - label: I understand Zoe stays fast and light, keeps audio on-device, and never acts on a write without approval.

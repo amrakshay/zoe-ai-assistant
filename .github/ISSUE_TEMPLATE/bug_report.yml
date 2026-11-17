@@ -1,0 +1,45 @@
+name: Bug report
+description: Something doesn't work, or Zoe did something you didn't approve
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please don't paste secrets, tokens, private transcripts or audio here.** If Zoe ran a tool or sent something without your approval, report it privately instead (Security → Report a vulnerability).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did or said, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Hold right ⌥ and say …\n2. …"
+  - type: input
+    id: version
+    attributes:
+      label: Zoe version
+      description: About Zoe, or the release / commit you built
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 26.6, MacBook Pro M4 Pro
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Push-to-talk / start, Speech-to-text, Spoken replies / voice, Echo or self-triggering, Character / bubble, Panels / cards, Approvals, Sessions / routing, Background jobs, Context / paste, Install / permissions, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Relevant lines from the app or core log, with anything private removed.
+      render: text

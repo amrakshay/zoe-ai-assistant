@@ -67,4 +67,6 @@ To change the cask (description, caveats, `depends_on`), edit `scripts/make-cask
 ./scripts/build-app.sh && ./scripts/package-release.sh && ./scripts/check-version.sh
 ```
 
-Set `ZOE_SIGN_IDENTITY` to a self-signed code-signing identity to keep permission grants across your own rebuilds.
+**Keeping permissions across your own rebuilds.** Each ad-hoc build is a new identity to macOS, so Accessibility (and sometimes Microphone) must be granted again; removing and re-adding Zoe in System Settings may not be enough. If that happens: `tccutil reset Accessibility io.github.amrakshay.zoe`, launch Zoe, grant at the prompt, relaunch. To avoid it, sign your builds with a self-signed identity:
+1. Keychain Access → Certificate Assistant → Create a Certificate… → Name `Zoe Dev`, Identity Type **Self-Signed Root**, Certificate Type **Code Signing**.
+2. Build with `ZOE_SIGN_IDENTITY="Zoe Dev" ./scripts/build-app.sh`. Grants then survive rebuilds signed with the same certificate.

@@ -24,6 +24,13 @@ final class VoiceController {
     /// Say "On it." if the reply hasn't started this long after the transcript went to the core.
     var ackDelay: Duration = .milliseconds(800)
     private var ackTask: Task<Void, Never>?
+    // Per-turn latency metrics, printed as "[metrics]" lines (no transcript text).
+    private var turnNo = 0
+    private var turnEndAt: TimeInterval = 0
+    private var firstSentence = true
+    private func metric(_ what: String) {
+        print(String(format: "[metrics] turn %d: end of turn → %@ %.0f ms", turnNo, what, (Self.now() - turnEndAt) * 1000))
+    }
     private var unloadTask: Task<Void, Never>?
     /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
     var unloadAfter: Duration = .seconds(120)
@@ -91,6 +98,7 @@ final class VoiceController {
         let key = hotkey.kind == .rightOption ? "right ⌥" : "⌃⌥Space"
         onStatus?("Hold \(key) to talk, or tap it for a conversation")
         speaker.onReplyDone = { [weak self] in self?.replyFinished() }
+        speaker.onFirstAudio = { [weak self] in self?.metric("first reply audio") }
         let warm = await speaker.warmUp()
         print(String(format: "voice: %@ (%@), warmed up in %.0f ms", speaker.voice.name, speaker.voice.identifier, warm))
         prepareSpeechModelIfNeeded()
@@ -128,6 +136,7 @@ final class VoiceController {
     /// A sentence of the reply, as it streams from the core.
     func speak(_ text: String) {
         ackTask?.cancel()
+        if firstSentence { firstSentence = false; metric("first reply sentence") }
         speaker.enqueue(text)
     }
 
@@ -144,6 +153,7 @@ final class VoiceController {
             try? await Task.sleep(for: ackDelay)
             guard !Task.isCancelled, let self, !self.speaker.isSpeaking else { return }
             self.speaker.playAcknowledgement()
+            self.metric("acknowledgement (\"On it.\")")
         }
     }
 
@@ -179,6 +189,11 @@ final class VoiceController {
         case .stopEngine:
             captions.end()
             audio.stop()
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                print("[metrics] conversation ended; mic held: \(CallDetect.selfCapturing())")
+                _ = self
+            }
             audio.samplesQueue.async { [listener] in listener?.pause() }
             unloadTask?.cancel()
             unloadTask = Task { [stt, unloadAfter] in
@@ -187,6 +202,7 @@ final class VoiceController {
             }
         case .endTurn:
             captions.end()
+            turnNo += 1; turnEndAt = Self.now(); firstSentence = true
             audio.samplesQueue.async { [listener, weak self] in
                 guard let samples = listener?.takeTurn() else { return }
                 listener?.pause()      // half-duplex until the reply is done (barge-in comes with #5)
@@ -195,6 +211,7 @@ final class VoiceController {
                     self.onTurn?(samples)
                     do {
                         let r = try await self.stt.transcribe(samples)
+                        self.metric(String(format: "transcript (Whisper %.0f ms, %.1f s of audio)", r.millis, Double(samples.count) / 16000))
                         self.onTranscript?(r.text, r.millis)
                         if r.text.isEmpty { self.replyFinished() }   // nothing said: keep listening
                     } catch {

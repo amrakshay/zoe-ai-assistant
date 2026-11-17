@@ -44,6 +44,7 @@ Swift menu-bar app                                   Python core (child process,
 | [REVIEW.md](REVIEW.md) | Independent adversarial review of the design |
 | [feasibility/](feasibility/README.md) | Phase 0 feasibility tests with measured results, and the code to re-run them |
 | [mock/assistant-flows.html](mock/assistant-flows.html) | Interactive mock of the main flows (open in a browser) |
+| [docs/phase-1-results.md](docs/phase-1-results.md) | Phase 1 acceptance run: measured budgets and latency |
 | [docs/RELEASING.md](docs/RELEASING.md) | How releases work |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, branches, commits and checks |
 

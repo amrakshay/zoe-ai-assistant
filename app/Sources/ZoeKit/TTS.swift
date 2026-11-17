@@ -17,6 +17,8 @@ public final class Speaker {
     public var onReplyDone: (() -> Void)?
     /// Output level (RMS, 0…1) while speech plays, about every 20–100 ms, on the main actor.
     public var onLevel: ((Float) -> Void)?
+    /// The first buffer of a reply's first queued sentence was scheduled (for latency metrics).
+    public var onFirstAudio: (() -> Void)?
     /// Milliseconds from a reply's first `enqueue` to its first scheduled buffer; and engine start.
     public private(set) var lastFirstAudioMillis: Double = 0
     public private(set) var lastEngineStartMillis: Double = 0
@@ -34,6 +36,7 @@ public final class Speaker {
     private var replyActive = false
     private var generation = 0             // bumps on stop(); stale callbacks are ignored
     private var firstEnqueueAt: TimeInterval?
+    private var awaitingFirstAudio = false   // only a reply's first sentence is timed
     private var idleTask: Task<Void, Never>?
     private var ack: [AVAudioPCMBuffer] = []
 
@@ -78,7 +81,7 @@ public final class Speaker {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         beginReplyIfNeeded()
-        if firstEnqueueAt == nil { firstEnqueueAt = Self.now() }
+        if awaitingFirstAudio { firstEnqueueAt = firstEnqueueAt ?? Self.now() }
         queue.append(t)
         pump()
     }
@@ -106,7 +109,7 @@ public final class Speaker {
 
     private func beginReplyIfNeeded() {
         idleTask?.cancel()
-        if !replyActive { replyActive = true; replyOpen = true; firstEnqueueAt = nil }
+        if !replyActive { replyActive = true; replyOpen = true; firstEnqueueAt = nil; awaitingFirstAudio = true }
     }
 
     private func pump() {
@@ -134,7 +137,8 @@ public final class Speaker {
         guard let p = ensureEngine(format: b.format) else { return }
         if let f = firstEnqueueAt {
             lastFirstAudioMillis = (Self.now() - f) * 1000
-            firstEnqueueAt = nil
+            firstEnqueueAt = nil; awaitingFirstAudio = false
+            onFirstAudio?()
         }
         pendingBuffers += 1
         p.scheduleBuffer(b, completionCallbackType: .dataPlayedBack) { [weak self] _ in

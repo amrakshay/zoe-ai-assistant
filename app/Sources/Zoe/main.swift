@@ -165,6 +165,8 @@ if args.contains("--ui-demo") {
             ch.state = .talking
             bubble.appendReply("You have three meetings this afternoon.")
             bubble.appendReply("The first is a design review at two.")
+            bubble.appendReply("Your calendar lists you as a required attendee on every meeting today and tomorrow, and the open office hour is marked as a drop-in because its description says people can stop by.")
+            bubble.appendReply("The invite itself doesn't mark you as optional, so I counted it as required.")
             await phase("talking", 4, level: true)
             bubble.showYou("Which pods are failing in the dev cluster?")
             bubble.showFullReply("""

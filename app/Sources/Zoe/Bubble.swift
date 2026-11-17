@@ -16,7 +16,12 @@ final class BubbleHover { var on = false }
 struct BubbleView: View {
     let model: BubbleContent
     let hover: BubbleHover
+    /// The bubble's width (text wraps to it); nil measures the text's natural one-line width.
+    var width: CGFloat? = nil
     var onClose: () -> Void
+
+    static let maxWidth: CGFloat = 380
+    static let cardHeight: CGFloat = 260
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -24,7 +29,8 @@ struct BubbleView: View {
                 Text(model.you)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .lineLimit(model.card ? 2 : 3)
+                    .lineLimit(model.card ? 2 : 4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !model.reply.isEmpty {
                 if model.card {
@@ -33,19 +39,18 @@ struct BubbleView: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(height: 260)          // a ScrollView doesn't report its content height
+                    .frame(height: Self.cardHeight)   // a ScrollView doesn't report its content height
                 } else {
                     Text(Self.markdown(model.reply))
                         .textSelection(.enabled)
-                        .lineLimit(8)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
         .font(.body)
         .padding(12)
-        .frame(width: model.card ? 380 : nil, alignment: .leading)
-        .frame(maxWidth: 380, alignment: .leading)
-        .fixedSize(horizontal: !model.card, vertical: true)
+        .frame(width: width, alignment: .leading)
+        .fixedSize(horizontal: width == nil, vertical: true)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(alignment: .topTrailing) {
             if hover.on {
@@ -151,9 +156,20 @@ final class BubbleWindow {
     /// Above the character if there's room, else below; right-aligned with it, kept on screen.
     func relayout() {
         guard let a = anchor, !(model.you.isEmpty && model.reply.isEmpty) else { return }
-        let view = BubbleView(model: model, hover: hover, onClose: { [weak self] in self?.hide() })
-        let size = NSHostingView(rootView: view).fittingSize     // a fresh view measures synchronously
-        host.rootView = view
+        // Measure with fresh views (they lay out synchronously): first the text's natural width, capped;
+        // then the height when wrapped to that width. Too tall for a bubble → show it as a scrolling card.
+        var shown = model
+        let close: () -> Void = { [weak self] in self?.hide() }
+        func measure(_ w: CGFloat?) -> NSSize {
+            NSHostingView(rootView: BubbleView(model: shown, hover: hover, width: w, onClose: close)).fittingSize
+        }
+        let pad: CGFloat = 6 * 2          // the outer padding; `width` includes the inner one
+        var width = shown.card ? BubbleView.maxWidth : min(measure(nil).width - pad, BubbleView.maxWidth)
+        var size = measure(width)
+        if !shown.card && size.height > BubbleView.cardHeight + 80 {
+            shown.card = true; width = BubbleView.maxWidth; size = measure(width)
+        }
+        host.rootView = BubbleView(model: shown, hover: hover, width: width, onClose: close)
         let screen = (a.screen ?? NSScreen.main ?? NSScreen.screens[0]).visibleFrame
         let af = a.frame
         var x = af.midX + 40 - size.width

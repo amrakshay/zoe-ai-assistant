@@ -15,11 +15,27 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 
 ## Build and test
 
-There's no app yet. Until phase 1, CI runs the repo checks:
+You need macOS 26 on Apple Silicon, the Xcode Command Line Tools (Swift 6.2) and [uv](https://docs.astral.sh/uv/). Full Xcode isn't needed.
 
 ```bash
-./scripts/ci-checks.sh
+cd core && uv sync && uv run pytest -q && cd ..
 ```
+
+```bash
+swift build && swift run zoe-selftest
+```
+
+```bash
+swift run Zoe --smoke "hello"
+```
+
+```bash
+swift run Zoe
+```
+
+- The self-test must print `ALL CHECKS PASSED`; add a check for any new behaviour in `ZoeKit`.
+- `--smoke` starts the core, sends one message and prints the reply and timings, with no UI.
+- `./scripts/ci-checks.sh` runs the repo checks (privacy, syntax, version).
 
 The feasibility spikes each have a "How to re-run" section in their report under `feasibility/`.
 

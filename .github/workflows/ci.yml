@@ -14,8 +14,7 @@ concurrency:
 
 jobs:
   # Keep this job name: it's the required status check on main.
-  # Phase 1 adds: swift build, self-test (Swift app + Python core gate policy tests), build-app.sh,
-  # package-release.sh, the full version check and the Homebrew cask lint (see PLAN.md §8, phase 1).
+  # Still to come in phase 1 (#7): build-app.sh, package-release.sh, the full version check, cask lint.
   build-and-test:
     runs-on: macos-26
     steps:
@@ -25,3 +24,13 @@ jobs:
       - run: swift --version
       - name: Repo checks (privacy, syntax, version)
         run: ./scripts/ci-checks.sh
+      - uses: astral-sh/setup-uv@v6
+      - name: Core tests
+        working-directory: core
+        run: uv sync --locked && uv run pytest -q
+      - name: Build (debug)
+        run: swift build
+      - name: Self-test
+        run: swift run zoe-selftest
+      - name: Smoke test (app ↔ core)
+        run: swift run Zoe --smoke "hello from CI"

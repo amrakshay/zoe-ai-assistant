@@ -18,7 +18,25 @@ Zoe is a macOS voice assistant that does its work through Claude Code:
 | `feasibility/` | Phase 0 reports (`F01`–`F07`), summary, and spike code under `spikes/` |
 | `mock/` | Interactive HTML mock of the flows |
 | `scripts/ci-checks.sh` | Repo checks run by CI (privacy, syntax, version) |
-| `app/`, `core/` | Arrive in phase 1 (layout in PLAN.md §7 Components) |
+| `Package.swift`, `app/Sources/` | Swift: `ZoeKit` (UI-free logic: JSON-lines framing, core supervision), `Zoe` (menu-bar app), `SelfTest` (`zoe-selftest`) |
+| `core/` | Python core (uv): `src/zoe_core/` (`main.py` stdio loop, `protocol.py`), `tests/` (pytest) |
+
+## Commands
+
+```bash
+cd core && uv sync && uv run pytest -q
+```
+
+```bash
+swift build && swift run zoe-selftest
+```
+
+```bash
+swift run Zoe --smoke "hello"
+```
+
+- Run the self-test and the core tests after any change; the self-test must print `ALL CHECKS PASSED`.
+- The core writes protocol messages only to stdout; logs go to stderr.
 
 ## Rules that must not regress
 

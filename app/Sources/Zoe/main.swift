@@ -2,7 +2,8 @@
 // typed test utterance. Audio (#3–#5) and the character (#6) come next.
 //
 // Flags:
-//   --smoke "text"   start the core, send one utterance, print the reply and timings, quit (no UI)
+//   --smoke "text"   start the core, send the utterance(s) (separate several with " || "), print the
+//                    replies and timings, quit (no UI)
 import AppKit
 import ZoeKit
 
@@ -21,7 +22,7 @@ func coreDirectory() -> URL {
 
 let args = CommandLine.arguments
 if let i = args.firstIndex(of: "--smoke") {
-    let text = i + 1 < args.count ? args[i + 1] : "hello"
+    let texts = (i + 1 < args.count ? args[i + 1] : "hello").components(separatedBy: " || ")
     let link = CoreLink(command: .development(coreDir: coreDirectory()), callbackQueue: DispatchQueue(label: "smoke"))
     let done = DispatchSemaphore(value: 0)
     let t0 = Date()
@@ -32,18 +33,36 @@ if let i = args.firstIndex(of: "--smoke") {
         if case .ready = s {
             print(String(format: "ready after %.0f ms", Date().timeIntervalSince(t0) * 1000))
             sentAt = Date()
-            link.send(CoreMessage("utterance", ["id": "smoke-1", "text": text, "trigger": "text"]))
+            print("> \(texts[0])")
+            link.send(CoreMessage("utterance", ["id": "smoke-1", "text": texts[0], "trigger": "text"]))
         }
     }
+    nonisolated(unsafe) var firstSay: Double?
+    nonisolated(unsafe) var turn = 0
     link.onMessage = { m in
-        if m.type == "say" {
-            print("say: \(m.string("text") ?? "")")
-            print(String(format: "reply after %.0f ms", Date().timeIntervalSince(sentAt) * 1000))
-            done.signal()
+        switch m.type {
+        case "say":
+            let t = Date().timeIntervalSince(sentAt) * 1000
+            if let text = m.string("text"), !text.isEmpty {
+                if firstSay == nil { firstSay = t; print(String(format: "first sentence after %.0f ms", t)) }
+                print("say: \(text)")
+            }
+            if (m["final"] as? Bool) == true {
+                print(String(format: "reply complete after %.0f ms", t))
+                turn += 1
+                if turn < texts.count {
+                    firstSay = nil; sentAt = Date()
+                    print("> \(texts[turn])")
+                    link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
+                } else { done.signal() }
+            }
+        case "state": print("assistant: \(m.string("value") ?? "?")")
+        case "error": print("core error: \(m.string("message") ?? "?")")
+        default: break
         }
     }
     link.start()
-    let ok = done.wait(timeout: .now() + 30) == .success
+    let ok = done.wait(timeout: .now() + .seconds(120 * texts.count)) == .success
     link.stop()
     Thread.sleep(forTimeInterval: 0.3)
     exit(ok ? 0 : 1)

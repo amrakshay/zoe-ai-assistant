@@ -32,5 +32,7 @@ jobs:
         run: swift build
       - name: Self-test
         run: swift run zoe-selftest
-      - name: Smoke test (app ↔ core)
+      - name: Smoke test (app ↔ core, echo brain; CI has no Claude login)
+        env:
+          ZOE_BRAIN: echo
         run: swift run Zoe --smoke "hello from CI"

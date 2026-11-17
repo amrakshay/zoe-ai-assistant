@@ -1,10 +1,9 @@
 name: Release
 
 # release-please keeps a "release PR" (version.txt + CHANGELOG.md) up to date from Conventional Commits.
-# Merging it tags vX.Y.Z and creates the GitHub Release.
-# Phase 1 adds a build job here (as in maclens): build the app on macos-26, package Zoe-X.Y.Z.zip + .sha256,
-# attest provenance, upload to the release and update the Homebrew cask. It must live in this same workflow,
-# because releases created with GITHUB_TOKEN don't trigger other workflows.
+# Merging it tags vX.Y.Z and creates the GitHub Release; the build job below then attaches the app and updates
+# the Homebrew cask. (Both live in one workflow because releases created with GITHUB_TOKEN don't trigger
+# other workflows.)
 
 on:
   push:
@@ -27,3 +26,54 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: macos-26
+    permissions:
+      contents: write
+      id-token: write       # build provenance
+      attestations: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      HAS_TAP: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}   # tap update runs once the secret exists
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Core tests
+        working-directory: core
+        run: uv sync --locked && uv run pytest -q
+
+      - name: Self-test
+        run: swift run zoe-selftest
+
+      - name: Build app (ad-hoc signed)
+        env:
+          ZOE_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build-app.sh
+
+      - name: Package
+        run: ./scripts/package-release.sh
+
+      - name: Check version consistency (app, zip, cask, tag)
+        run: ./scripts/check-version.sh "$TAG"
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: dist/Zoe-*.zip
+
+      - name: Upload to the GitHub Release
+        run: gh release upload "$TAG" dist/Zoe-*.zip dist/Zoe-*.zip.sha256 --clobber
+
+      - name: Update Homebrew tap
+        if: env.HAS_TAP == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: ./scripts/publish-cask.sh dist/zoe.rb "${TAG#v}"

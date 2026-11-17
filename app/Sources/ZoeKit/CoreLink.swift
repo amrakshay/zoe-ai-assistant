@@ -27,6 +27,21 @@ public struct CoreCommand: Sendable {
                     directory: coreDir, environment: Self.environmentWithUVOnPath())
     }
 
+    /// The installed app: `Contents/Resources/core/launch.sh` syncs the core's environment with uv, then
+    /// becomes the core (#7).
+    public static func bundled(coreDir: URL) -> CoreCommand {
+        CoreCommand(executable: coreDir.appendingPathComponent("launch.sh"), arguments: [], directory: coreDir)
+    }
+
+    /// The bundled core if this is the installed app, else the development checkout.
+    public static func auto(developmentCoreDir: URL) -> CoreCommand {
+        if let res = Bundle.main.resourceURL?.appendingPathComponent("core"),
+           FileManager.default.isExecutableFile(atPath: res.appendingPathComponent("launch.sh").path) {
+            return .bundled(coreDir: res)
+        }
+        return .development(coreDir: developmentCoreDir)
+    }
+
     /// GUI apps don't inherit the shell PATH, so add the usual uv locations.
     static func environmentWithUVOnPath() -> [String: String] {
         var env = ProcessInfo.processInfo.environment

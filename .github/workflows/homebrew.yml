@@ -1,0 +1,36 @@
+name: Publish Homebrew cask
+
+# Manually (re)publish the cask for an existing GitHub Release, e.g. a release made before the tap token existed.
+# New releases are published automatically by release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build cask from the release asset
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          curl -fsSL -o "Zoe-$VERSION.zip" "https://github.com/amrakshay/zoe-ai-assistant/releases/download/$TAG/Zoe-$VERSION.zip"
+          SHA=$(sha256sum "Zoe-$VERSION.zip" | awk '{print $1}')
+          ./scripts/make-cask.sh "$VERSION" "$SHA" > zoe.rb
+          cat zoe.rb
+      - name: Push to amrakshay/homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [ -n "$TAP_TOKEN" ] || { echo "::error::Add the HOMEBREW_TAP_TOKEN secret first (see docs/RELEASING.md)"; exit 1; }
+          ./scripts/publish-cask.sh zoe.rb "${TAG#v}"

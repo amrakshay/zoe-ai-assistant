@@ -88,7 +88,8 @@ final class VoiceController {
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.handle(.tick(Self.now())) }
         }
-        onStatus?("Hold right ⌥ to talk, or tap it for a conversation")
+        let key = hotkey.kind == .rightOption ? "right ⌥" : "⌃⌥Space"
+        onStatus?("Hold \(key) to talk, or tap it for a conversation")
         speaker.onReplyDone = { [weak self] in self?.replyFinished() }
         let warm = await speaker.warmUp()
         print(String(format: "voice: %@ (%@), warmed up in %.0f ms", speaker.voice.name, speaker.voice.identifier, warm))

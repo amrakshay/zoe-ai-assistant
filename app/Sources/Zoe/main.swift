@@ -324,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startLink() {
-        link = CoreLink(command: .development(coreDir: coreDirectory()))
+        link = CoreLink(command: .auto(developmentCoreDir: coreDirectory()))
         link.onLog = { FileHandle.standardError.write(Data($0.utf8)) }
         link.onState = { [weak self] s in MainActor.assumeIsolated { self?.show(s) } }
         link.onMessage = { [weak self] m in MainActor.assumeIsolated { self?.handle(m) } }

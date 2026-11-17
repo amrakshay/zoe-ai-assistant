@@ -9,9 +9,15 @@ let package = Package(
         .executable(name: "Zoe", targets: ["Zoe"]),
         .executable(name: "zoe-selftest", targets: ["SelfTest"]),
     ],
+    dependencies: [
+        // ONNX Runtime (MIT) for Silero VAD; same package and version as the F05 wake-word spike.
+        .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager", exact: "1.24.2"),
+    ],
     targets: [
         // UI-free logic: core link, framing, supervision. Everything here is testable from the self-test.
-        .target(name: "ZoeKit", path: "app/Sources/ZoeKit"),
+        .target(name: "ZoeKit",
+                dependencies: [.product(name: "onnxruntime", package: "onnxruntime-swift-package-manager")],
+                path: "app/Sources/ZoeKit"),
         // The menu-bar app.
         .executableTarget(name: "Zoe", dependencies: ["ZoeKit"], path: "app/Sources/Zoe"),
         // Plain-executable test suite (Swift Testing / XCTest aren't available with the Command Line Tools).

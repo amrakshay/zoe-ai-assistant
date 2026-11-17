@@ -4,6 +4,7 @@
 // Flags:
 //   --smoke "text"   start the core, send the utterance(s) (separate several with " || "), print the
 //                    replies and timings, quit (no UI)
+//   --listen-test N  start a hands-free conversation for N seconds, print VAD turns and timings, quit
 import AppKit
 import ZoeKit
 
@@ -68,6 +69,36 @@ if let i = args.firstIndex(of: "--smoke") {
     exit(ok ? 0 : 1)
 }
 
+// MARK: - listen test
+
+if let i = args.firstIndex(of: "--listen-test") {
+    let secs = i + 1 < args.count ? Double(args[i + 1]) ?? 12 : 12
+    MainActor.assumeIsolated {
+        let v = VoiceController()
+        v.onStatus = { print("voice: \($0)") }
+        v.onUIState = { print("state: \($0)") }
+        v.onTurn = { s in
+            print(String(format: "turn: %.2f s of audio", Double(s.count) / 16000))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { v.replyFinished() }
+        }
+        Task { @MainActor in
+            await v.start()
+            v.click()
+            try? await Task.sleep(for: .seconds(secs))
+            print("mic held during conversation: \(CallDetect.selfCapturing())")
+            v.endConversation()
+            try? await Task.sleep(for: .milliseconds(300))
+            print("mic held after it ended: \(CallDetect.selfCapturing())")
+            try? await Task.sleep(for: .milliseconds(500))
+            var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
+            print(String(format: "cpu %.2f s over the run, max RSS %.0f MB", Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6, Double(ru.ru_maxrss) / 1048576))
+            exit(0)
+        }
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.run()
+}
+
 // MARK: - menu-bar app
 
 @MainActor
@@ -75,6 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Core: starting…", action: nil, keyEquivalent: "")
     private let replyItem = NSMenuItem(title: "No reply yet", action: nil, keyEquivalent: "")
+    private let voiceItem = NSMenuItem(title: "Voice: starting…", action: nil, keyEquivalent: "")
+    private let voice = VoiceController()
     private var link: CoreLink!
     private var counter = 0
 
@@ -82,10 +115,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "Zoe ○"
         let menu = NSMenu()
-        stateItem.isEnabled = false; replyItem.isEnabled = false
+        stateItem.isEnabled = false; replyItem.isEnabled = false; voiceItem.isEnabled = false
         menu.addItem(stateItem)
+        menu.addItem(voiceItem)
         menu.addItem(replyItem)
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
@@ -93,7 +128,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
 
         startLink()
+        voice.onStatus = { [weak self] s in self?.voiceItem.title = "Voice: \(s)"; print("voice: \(s)") }
+        voice.onUIState = { [weak self] st in
+            guard let self else { return }
+            switch st {
+            case .idle: self.statusItem.button?.title = "Zoe ●"
+            case .listening: self.statusItem.button?.title = "Zoe 🎙"
+            case .thinking: self.statusItem.button?.title = "Zoe …"
+            case .inCall: self.statusItem.button?.title = "Zoe ☎︎"
+            }
+        }
+        voice.onTurn = { [weak self] samples in
+            // Until Whisper lands (#4): report what was heard and carry on.
+            let secs = Double(samples.count) / 16000
+            self?.voiceItem.title = String(format: "Voice: heard %.1f s of audio (speech-to-text comes in #4)", secs)
+            print(String(format: "turn: %.2f s of audio", secs))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.voice.replyFinished() }
+        }
+        Task { await voice.start() }
     }
+
+    @objc private func startConversation() { voice.click() }
 
     private func startLink() {
         link = CoreLink(command: .development(coreDir: coreDirectory()))

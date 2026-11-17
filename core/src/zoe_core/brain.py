@@ -16,12 +16,14 @@ import time
 from typing import Any, Awaitable, Callable
 
 from .gate import BUILTIN_READ, pre_tool_use
-from .speech import SentenceSplitter
+from .speech import READ_ALL, SentenceSplitter, SpokenReply
 
 PERSONA = """
 You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, then shown in a small bubble.
-- Start with a short spoken answer: one to three plain sentences, no markdown, no lists, no code, no URLs.
-- If more detail would help, add it after a blank line; it is shown on screen, not read out.
+- Start with a short spoken answer: one to three plain sentences (under 50 words), no markdown, no lists,
+  no code, no URLs.
+- If more detail would help, add it after a blank line; it is shown on screen, not read out. Don't say
+  that the details are on screen; the app says so.
 - Be direct and warm. Don't narrate your tool use. Never ask the user to type.
 - Never use plan mode. Never run interactive commands.
 - You can only read in this version. If asked to change, send, create or run something, say you can't do
@@ -47,6 +49,7 @@ class Brain:
         self.send = send
         self.client = None
         self.session_id: str | None = None
+        self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
 
@@ -103,15 +106,46 @@ class Brain:
         if self._turn and not self._turn.done():
             self._turn.cancel()
 
+    async def _read_all(self, uid: Any) -> None:
+        """'Read it all': speak every speakable sentence of the last reply, without the cap."""
+        spoken = SpokenReply(cap=False)
+        splitter = SentenceSplitter()
+        sentences = splitter.feed(self.last_reply + "\n") + splitter.flush()
+        await self.send("state", value="talking")
+        said = False
+        for sentence in sentences:
+            if spoken.offer(sentence):
+                said = True
+                await self.send("say", utterance_id=uid, text=sentence, final=False)
+        if not said:
+            await self.send("say", utterance_id=uid, text="There's nothing more to read out.", final=False)
+        await self.send("say", utterance_id=uid, text="", final=True)
+        await self.send("state", value="idle")
+
     async def _run(self, uid: Any, text: str) -> None:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
+        if READ_ALL.match(text.strip()) and self.last_reply:
+            await self._read_all(uid)
+            return
         t0 = time.monotonic()
         first = None
         splitter = SentenceSplitter()
+        spoken = SpokenReply()
         full: list[str] = []
         streamed = False
+
+        async def say(sentences: list[str], breaks: list[bool]) -> None:
+            nonlocal first
+            for sentence, new_para in zip(sentences, breaks):
+                if (s := spoken.offer(sentence, new_para)) is None:
+                    continue
+                if first is None:
+                    first = time.monotonic() - t0
+                    await self.send("state", value="talking")
+                await self.send("say", utterance_id=uid, text=s, final=False)
+
         await self.send("state", value="thinking")
         try:
             await self.ready()
@@ -123,28 +157,31 @@ class Brain:
                         delta = ev["delta"]["text"]
                         streamed = True
                         full.append(delta)
-                        for sentence in splitter.feed(delta):
-                            if first is None:
-                                first = time.monotonic() - t0
-                                await self.send("state", value="talking")
-                            await self.send("say", utterance_id=uid, text=sentence, final=False)
+                        got = splitter.feed(delta)
+                        await say(got, splitter.breaks)
                     elif ev.get("type") == "message_stop":
                         # End of one assistant message: close its last sentence and break paragraphs.
-                        for sentence in splitter.flush():
-                            await self.send("say", utterance_id=uid, text=sentence, final=False)
+                        got = splitter.flush()
+                        await say(got, splitter.breaks)
                         full.append("\n\n")
                 elif isinstance(m, AssistantMessage) and not streamed:
                     for b in m.content:  # fallback if partial messages are unavailable
                         if isinstance(b, TextBlock):
                             full.append(b.text)
-                            await self.send("say", utterance_id=uid, text=b.text, final=False)
+                            got = splitter.feed(b.text + "\n")
+                            await say(got, splitter.breaks)
+                            got = splitter.flush()
+                            await say(got, splitter.breaks)
                 elif isinstance(m, ResultMessage):
                     self.session_id = m.session_id
-            for sentence in splitter.flush():
-                await self.send("say", utterance_id=uid, text=sentence, final=False)
+            got = splitter.flush()
+            await say(got, splitter.breaks)
+            for line in spoken.finish():
+                await self.send("say", utterance_id=uid, text=line, final=False)
             reply = "".join(full).strip()
+            self.last_reply = reply
             await self.send("say", utterance_id=uid, text="", final=True)
-            await self.send("bubble", utterance_id=uid, text=reply)
+            await self.send("bubble", utterance_id=uid, text=reply, summarised=spoken.held_back)
             log(f"turn: first sentence {first if first is None else round(first, 2)} s, total {time.monotonic() - t0:.2f} s")
         except asyncio.CancelledError:
             if self.client:

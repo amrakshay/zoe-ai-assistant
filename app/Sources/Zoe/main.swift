@@ -96,6 +96,38 @@ if let i = args.firstIndex(of: "--stt-bench") {
     exit(0)
 }
 
+// MARK: - speak test
+
+if let i = args.firstIndex(of: "--speak-test") {
+    // Warms up, then speaks the given text sentence by sentence (split on ". "), twice; prints timings.
+    let text = i + 1 < args.count ? args[i + 1] : "You have three meetings this afternoon. The first is at two."
+    MainActor.assumeIsolated {
+        let sp = Speaker()
+        Task { @MainActor in
+            let warm = await sp.warmUp()
+            print(String(format: "voice %@ (%@, quality %d); warm-up %.0f ms", sp.voice.name, sp.voice.identifier, sp.voice.quality.rawValue, warm))
+            for run in 1...2 {
+                let t0 = ProcessInfo.processInfo.systemUptime
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    sp.onReplyDone = { c.resume() }
+                    for s in text.components(separatedBy: ". ") { sp.enqueue(s) }
+                    sp.endReply()
+                }
+                print(String(format: "run %d: first audio %.0f ms (engine start %.0f ms), all played after %.0f ms", run, sp.lastFirstAudioMillis, sp.lastEngineStartMillis, (ProcessInfo.processInfo.systemUptime - t0) * 1000))
+            }
+            let t0 = ProcessInfo.processInfo.systemUptime
+            sp.playAcknowledgement()
+            print(String(format: "acknowledgement scheduled in %.1f ms", (ProcessInfo.processInfo.systemUptime - t0) * 1000))
+            try? await Task.sleep(for: .seconds(1.5))
+            var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
+            print(String(format: "cpu %.2f s, max RSS %.0f MB", Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6, Double(ru.ru_maxrss) / 1048576))
+            exit(0)
+        }
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.run()
+}
+
 // MARK: - listen test
 
 if let i = args.firstIndex(of: "--listen-test") {
@@ -107,7 +139,15 @@ if let i = args.firstIndex(of: "--listen-test") {
         v.onTurn = { s in print(String(format: "turn: %.2f s of audio", Double(s.count) / 16000)) }
         v.onTranscript = { text, ms in
             print(String(format: "transcript (%.0f ms): %@", ms, text))
-            if !text.isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { v.replyFinished() } }
+            guard !text.isEmpty else { return }
+            v.turnSent()
+            // Stand-in for Claude: reply after 1.5 s (so the acknowledgement plays), in two sentences.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                v.speak("You said: \(text)")
+                v.speak("That's all for this test.")
+                v.endReply()
+                print(String(format: "first sentence → first audio %.0f ms (output engine start %.0f ms)", v.speaker.lastFirstAudioMillis, v.speaker.lastEngineStartMillis))
+            }
         }
         Task { @MainActor in
             await v.start()
@@ -138,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let voice = VoiceController()
     private var link: CoreLink!
     private var counter = 0
+    private var current: String?       // utterance whose reply is being spoken
+    private var dropped: String?       // an interrupted reply: its remaining chunks are ignored
 
     func applicationDidFinishLaunching(_ note: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -171,7 +213,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voiceItem.title = "You: \(text)"
             print(String(format: "transcript (%.0f ms): %@", ms, text))
             self.counter += 1
-            self.link.send(CoreMessage("utterance", ["id": "u\(self.counter)", "text": text, "trigger": "ptt"]))
+            self.current = "u\(self.counter)"
+            self.link.send(CoreMessage("utterance", ["id": self.current!, "text": text, "trigger": "ptt"]))
+            self.voice.turnSent()
+        }
+        voice.onInterrupt = { [weak self] in
+            guard let self, let id = self.current else { return }
+            self.dropped = id            // ignore the rest of the interrupted reply
+            self.link.send(CoreMessage("user_interrupted", ["utterance_id": id]))
         }
         Task { await voice.start() }
     }
@@ -200,9 +249,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ m: CoreMessage) {
         switch m.type {
         case "say":
-            if let t = m.string("text"), !t.isEmpty { replyItem.title = t }
-            // Until Zoe speaks (#5): the reply is done when its final chunk arrives.
-            if (m["final"] as? Bool) == true { voice.replyFinished() }
+            if let id = m.string("utterance_id"), id == dropped { return }
+            if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t) }
+            if (m["final"] as? Bool) == true { voice.endReply() }
         case "state": print("assistant state: \(m.string("value") ?? "?")")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break

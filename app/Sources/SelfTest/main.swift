@@ -72,7 +72,15 @@ do {
 
     (m, a) = run([.click(0), .speechStart(1), .speechEnd(2), .click(3)])
     check("click starts hands-free", a[0] == start)
-    check("click while waiting ends the conversation", a[3] == end && m.phase == .idle)
+    check("click while waiting stops the reply and ends the conversation", a[3] == [.interruptReply] + end && m.phase == .idle)
+
+    (m, a) = run([.keyDown(0), .speechStart(0.3), .keyUp(2), .keyDown(4), .speechStart(4.2), .keyUp(6), .replyFinished(9)])
+    check("key during a reply interrupts it and listens", a[3] == [.interruptReply, .setState(.listening)] && m.phase == .idle)
+    check("…the held key sends a new turn", a[5] == [.endTurn, .setState(.thinking)])
+    check("…and its reply ends the conversation (the app drops the interrupted reply's end)", a[6] == end)
+
+    (m, a) = run([.click(0), .speechStart(1), .speechEnd(2), .keyDown(4), .keyUp(4.1)])
+    check("tap during a hands-free reply: interrupts and keeps listening", a[3] == [.interruptReply, .setState(.listening)] && a[4] == [.discardTurn] && m.phase == .listening(.handsFree))
 
     (m, a) = run([.keyDown(0), .keyUp(0.1), .keyDown(5), .keyUp(5.1)])
     check("tap during a conversation ends it", a[3] == [.discardTurn] + end && m.phase == .idle)

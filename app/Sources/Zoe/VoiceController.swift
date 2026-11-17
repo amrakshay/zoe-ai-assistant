@@ -12,6 +12,12 @@ final class VoiceController {
     /// The transcript of a turn ("" if nothing was said) and how long Whisper took.
     var onTranscript: ((String, Double) -> Void)?
     let stt = WhisperSTT()
+    let speaker = Speaker()
+    /// The user talked over a reply (key or click): the app tells the core and drops the rest of it.
+    var onInterrupt: (() -> Void)?
+    /// Say "On it." if the reply hasn't started this long after the transcript went to the core.
+    var ackDelay: Duration = .milliseconds(800)
+    private var ackTask: Task<Void, Never>?
     private var unloadTask: Task<Void, Never>?
     /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
     var unloadAfter: Duration = .seconds(120)
@@ -74,6 +80,9 @@ final class VoiceController {
             Task { @MainActor [weak self] in self?.handle(.tick(Self.now())) }
         }
         onStatus?("Hold right ⌥ to talk, or tap it for a conversation")
+        speaker.onReplyDone = { [weak self] in self?.replyFinished() }
+        let warm = await speaker.warmUp()
+        print(String(format: "voice: %@ (%@), warmed up in %.0f ms", speaker.voice.name, speaker.voice.identifier, warm))
         prepareSpeechModelIfNeeded()
     }
 
@@ -102,7 +111,29 @@ final class VoiceController {
     func click() { triggerAt = Self.now(); handle(.click(triggerAt)) }
 
     /// The reply has been spoken (or shown); in a hands-free conversation Zoe listens again.
-    func replyFinished() { handle(.replyFinished(Self.now())) }
+    func replyFinished() { ackTask?.cancel(); handle(.replyFinished(Self.now())) }
+
+    /// A sentence of the reply, as it streams from the core.
+    func speak(_ text: String) {
+        ackTask?.cancel()
+        speaker.enqueue(text)
+    }
+
+    /// The reply's last chunk arrived; the turn ends once it has been spoken.
+    func endReply() {
+        ackTask?.cancel()
+        speaker.endReply()
+    }
+
+    /// The transcript went to the core: if the reply is slow to start, acknowledge it.
+    func turnSent() {
+        ackTask?.cancel()
+        ackTask = Task { [weak self, ackDelay] in
+            try? await Task.sleep(for: ackDelay)
+            guard !Task.isCancelled, let self, !self.speaker.isSpeaking else { return }
+            self.speaker.playAcknowledgement()
+        }
+    }
 
     func endConversation() { handle(.endConversationRequested(Self.now())) }
 
@@ -163,6 +194,10 @@ final class VoiceController {
         case .setState(let s):
             if s == .listening { audio.samplesQueue.async { [listener] in listener?.resume() } }
             onUIState?(s)
+        case .interruptReply:
+            ackTask?.cancel()
+            speaker.stop()
+            onInterrupt?()
         case .refuse(let why):
             NSSound.beep()
             onStatus?("Not now: \(why)")

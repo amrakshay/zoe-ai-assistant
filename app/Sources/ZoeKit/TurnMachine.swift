@@ -39,6 +39,7 @@ public struct TurnMachine: Sendable {
         case discardTurn        // nothing was said
         case setState(UIState)
         case refuse(String)     // e.g. "in a call"
+        case interruptReply     // stop speaking and tell the core (a key press or click during a reply)
     }
 
     public enum Chime: Sendable, Equatable { case start, end }
@@ -91,7 +92,12 @@ public struct TurnMachine: Sendable {
             keyDownAt = nil
             let tap = t - down < tapThreshold
             let fromConversation = keyDownPhase != .idle
+            let overReply = keyDownPhase == .waiting(.handsFree)
             keyDownPhase = .idle
+            if overReply && tap {                     // a tap that only stopped the reply: keep listening
+                phase = .listening(.handsFree); lastActivity = t
+                return [.discardTurn]
+            }
             switch (fromConversation, tap) {
             case (false, true):                       // tap from idle: hands-free conversation
                 phase = .listening(.handsFree); lastActivity = t
@@ -105,11 +111,16 @@ public struct TurnMachine: Sendable {
                 phase = .listening(.handsFree); lastActivity = t
                 return [.discardTurn]
             }
-        case (.listening(.handsFree), .keyDown(let t)), (.waiting(.handsFree), .keyDown(let t)):
+        case (.listening(.handsFree), .keyDown(let t)):
             keyDownAt = t; keyDownPhase = phase
             phase = .listening(.hold)                 // maybe push-to-talk inside the conversation
             heardSpeech = false
             return []
+        case (.waiting(let mode), .keyDown(let t)):   // talking over a reply: stop it and listen
+            keyDownAt = t
+            keyDownPhase = mode == .handsFree ? .waiting(.handsFree) : .idle
+            phase = .listening(.hold); heardSpeech = false; lastActivity = t
+            return [.interruptReply, .setState(.listening)]
         case (.listening(.hold), .keyCancelled(let t)):
             keyDownAt = nil
             let fromConversation = keyDownPhase != .idle
@@ -135,7 +146,7 @@ public struct TurnMachine: Sendable {
             phase = .listening(.handsFree); heardSpeech = false; lastActivity = t
             return [.setState(.listening)]
         case (.waiting(.hold), .replyFinished(let t)):
-            return endConversation(at: t)
+            return endConversation(at: t, replyDone: true)
 
         case (_, .endConversationRequested(let t)) where phase != .idle:
             return endConversation(at: t)
@@ -155,9 +166,11 @@ public struct TurnMachine: Sendable {
         return [.endTurn, .setState(.thinking)]
     }
 
-    private mutating func endConversation(at t: TimeInterval) -> [Action] {
+    private mutating func endConversation(at t: TimeInterval, replyDone: Bool = false) -> [Action] {
         let wasListening: Bool = { if case .listening = phase { return true }; return false }()
+        let wasWaiting: Bool = { if case .waiting = phase { return !replyDone }; return false }()
         phase = .idle; keyDownAt = nil; keyDownPhase = .idle; heardSpeech = false
-        return (wasListening ? [.discardTurn] : []) + [.chime(.end), .stopEngine, .setState(.idle)]
+        return (wasListening ? [.discardTurn] : []) + (wasWaiting ? [.interruptReply] : [])
+            + [.chime(.end), .stopEngine, .setState(.idle)]
     }
 }

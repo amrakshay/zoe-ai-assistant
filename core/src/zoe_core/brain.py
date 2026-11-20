@@ -16,6 +16,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from .approvals import Approvals
+from .renderers import render
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
@@ -55,7 +56,7 @@ class Brain:
         self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
-        self.approvals = Approvals(send, session_id=lambda: self.session_id)
+        self.approvals = Approvals(send, render=render, session_id=lambda: self.session_id)
         self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
 
     def options(self):

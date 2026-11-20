@@ -14,6 +14,9 @@ public enum TerminalScript {
         return """
         #!/bin/zsh -l
         # Opened by Zoe. The command below is exactly what Zoe's card showed.
+        # Start clean: Claude Code variables inherited from whatever launched Zoe (e.g. a Claude Code terminal)
+        # would make `claude` here a "child session" that doesn't save its transcript.
+        unset -m 'CLAUDE*' 'ANTHROPIC*' 2>/dev/null
         cd \(dir) 2>/dev/null || cd "$HOME"
         print -P "%F{cyan}[Zoe]%f in $(pwd)"
         print -r -- \(quote("$ " + command))

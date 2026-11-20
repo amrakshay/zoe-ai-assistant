@@ -193,6 +193,7 @@ do {
     let s = TerminalScript.script(command: "sudo true", cwd: "/tmp/a b'c")
     check("goes to the folder, quoted", s.contains("cd '/tmp/a b'\\''c'"))
     check("runs exactly the command", s.contains("\nsudo true\n"))
+    check("clears inherited Claude Code variables first", s.contains("unset -m 'CLAUDE*' 'ANTHROPIC*'"))
     check("empty folder → home", TerminalScript.script(command: "claude", cwd: "").contains("cd $HOME"))
     let url = try TerminalScript.write(command: "echo hi", cwd: "/tmp")
     let p = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0

@@ -41,6 +41,8 @@ final class VoiceController {
     private var answerSpeechStart: TimeInterval?
     /// A spoken answer to an approval card: (pending id, approved).
     var onApprovalAnswer: ((String, Bool) -> Void)?
+    /// I started talking: the core can reconnect a closed session meanwhile (#29).
+    var onListeningStarted: (() -> Void)?
     /// A spoken answer to Claude's question: (pending id, question text, chosen label(s) or what I said).
     var onQuestionAnswer: ((String, String, String) -> Void)?
     private var unloadTask: Task<Void, Never>?
@@ -294,6 +296,7 @@ final class VoiceController {
             do {
                 try audio.start(voiceProcessing: ProcessInfo.processInfo.environment["ZOE_VP"] == "1")
                 audio.samplesQueue.async { [listener] in listener?.begin() }
+                onListeningStarted?()
                 let ms = (Self.now() - triggerAt) * 1000
                 onStatus?(String(format: "Listening (trigger → engine running %.0f ms; engine start %.0f ms)", ms, audio.lastStartMillis))
             } catch {

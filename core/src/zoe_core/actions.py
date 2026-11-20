@@ -13,6 +13,15 @@ import time
 from pathlib import Path
 
 
+_index = None
+
+
+def use_index(index) -> None:
+    """Log into the session index (#24) from now on, instead of actions.jsonl."""
+    global _index
+    _index = index
+
+
 def data_dir() -> Path:
     d = os.environ.get("ZOE_DATA_DIR") or os.path.expanduser("~/Library/Application Support/Zoe")
     return Path(d)
@@ -24,8 +33,14 @@ def input_hash(tool_input: object) -> str:
 
 
 def log_decision(tool: str, tool_input: object, decision: str, via: str, reason: str = "",
-                 session_id: str | None = None) -> None:
-    """`decision`: allow | deny. `via`: policy | click | voice | timeout | restart | interrupt."""
+                 session_id: str | None = None, tainted: bool = False) -> None:
+    """`decision`: allow | deny | question. `via`: policy | click | voice | terminal | timeout | interrupt | …"""
+    if _index is not None:
+        try:
+            _index.log_action(session_id, tool, input_hash(tool_input), decision, via, tainted, reason)
+            return
+        except Exception:  # noqa: BLE001 — fall back to the file rather than lose the record
+            pass
     rec = {"ts": round(time.time(), 3), "session": session_id, "tool": tool, "input_sha256": input_hash(tool_input),
            "decision": decision, "via": via, "reason": reason}
     try:

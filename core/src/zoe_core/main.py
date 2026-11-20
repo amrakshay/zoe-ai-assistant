@@ -35,6 +35,10 @@ class Core:
             await self.send("state", value="idle")
             if self.brain:
                 self.brain.warm_up()
+                if hasattr(self.brain, "activity"):
+                    await self.send("sessions_activity", list=self.brain.activity())
+                if hasattr(self.brain, "load_projects"):
+                    self.brain._projects_loading = asyncio.create_task(self.brain.load_projects())
         elif t == "ping":
             await self.send("pong", id=msg.get("id"), uptime_s=round(time.monotonic() - self.started, 3))
         elif t == "utterance":
@@ -47,6 +51,10 @@ class Core:
         elif t == "answer":
             if not (self.brain and self.brain.approvals.answer(msg)):
                 await self.send("error", message=f"answer for unknown or finished request: {msg.get('pending_id')}")
+        elif t == "listening":
+            # I started talking (#29): reconnect the active session now, while I speak, if it was closed.
+            if self.brain:
+                self.brain.warm_up()
         elif t == "user_interrupted":
             if self.brain:
                 await self.brain.interrupt()
@@ -62,10 +70,15 @@ class Core:
 
     async def open_session(self, msg: dict[str, Any]) -> None:
         """`open_session {where: terminal}` (#20): hand the conversation to Terminal."""
-        if msg.get("where", "terminal") != "terminal":
-            await self.send("error", message="only Terminal is supported for now")
+        where, sid = msg.get("where", "terminal"), msg.get("id")
+        if where == "zoe" and self.brain and sid:       # Recent Sessions → Continue here (#30)
+            if await self.brain.activate(str(sid)) is None:
+                await self.send("error", message="no such session")
             return
-        info = await self.brain.hand_off() if self.brain else None
+        if where != "terminal":
+            await self.send("error", message="only Terminal and Zoe are supported")
+            return
+        info = await self.brain.hand_off(str(sid) if sid else None) if self.brain else None
         if info is None:
             await self.send("error", message="no conversation to open yet")
             return
@@ -89,8 +102,16 @@ async def serve(reader: asyncio.StreamReader, write: Callable[[bytes], Awaitable
 
     b = None
     if brain:
+        from . import actions
         from .brain import Brain
-        b = Brain(send)
+        from .index import Index
+        try:
+            index = Index()
+            actions.use_index(index)
+        except Exception as e:  # noqa: BLE001 — Zoe still works without its index
+            log("session index unavailable:", repr(e))
+            index = None
+        b = Brain(send, index=index)
     core = Core(send, b)
     while True:
         try:

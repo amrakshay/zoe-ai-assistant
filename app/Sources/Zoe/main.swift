@@ -253,6 +253,26 @@ if args.contains("--ui-demo") {
             bubble.removeApproval("demo-1"); ch.waiting = 1
             await phase("approval2", 3)
             bubble.removeApproval("demo-2"); ch.waiting = 0
+            let panels = PanelWindow(anchor: ch.panel)
+            if let t = PanelContent(message: ["id": "panel-t", "kind": "table", "payload": [
+                "title": "Calendar: next 7 days", "columns": ["When", "What", "Where"],
+                "rows": (0..<40).map { ["Mon \(9 + $0 % 8):00", "Meeting \($0 + 1)", $0 % 3 == 0 ? "Room A" : "Video"] },
+                "truncated_rows": 0] as [String: Any]]) { panels.show(t) }
+            await phase("panel-table", 3)
+            if let PanelShot = ProcessInfo.processInfo.environment["ZOE_DEMO_SHOTS"], let v = panels.panel.contentView,
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(PanelShot)/panel-table.png"))
+            }
+            if let c = PanelContent(message: ["id": "panel-c", "kind": "choices", "payload": [
+                "prompt": "Which meeting should I prepare notes for?", "options": ["Design review", "1:1", "Planning"]] as [String: Any]]) { panels.show(c) }
+            await phase("panel-choices", 2)
+            if let dir = ProcessInfo.processInfo.environment["ZOE_DEMO_SHOTS"], let v = panels.panel.contentView,
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/panel-choices.png"))
+            }
+            panels.close()
             ch.state = .offline; bubble.hide(); await phase("offline", 2)
             ch.state = .idle; await phase("idle-after", 6)
             var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
@@ -320,6 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dropped: String?       // an interrupted reply: its remaining chunks are ignored
     private let character = CharacterWindow()
     private lazy var bubble = BubbleWindow(anchor: character.panel)
+    private lazy var panels = PanelWindow(anchor: character.panel)
     private let characterItem = NSMenuItem(title: "Hide Character", action: #selector(toggleCharacter), keyEquivalent: "h")
     private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
@@ -387,6 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.speak("Okay.")
         }
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
+        panels.onChoice = { [weak self] choice in self?.sendTyped(choice, trigger: "click") }
         bubble.onRunInTerminal = { [weak self] card in
             guard let self, let t = card.terminal else { return }
             self.link.answer(pendingID: card.id, value: "deny", via: "terminal")   // Zoe doesn't run it
@@ -457,6 +479,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("couldn't open Terminal: \(error)")
         }
+    }
+
+    /// A request that wasn't spoken (a typed line, a clicked choice): shown, then sent like an utterance.
+    func sendTyped(_ text: String, trigger: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        counter += 1
+        current = "u\(counter)"
+        bubble.showYou(t)
+        link.send(CoreMessage("utterance", ["id": current!, "text": t, "trigger": trigger]))
+        voice.turnSent()
     }
 
     /// Recent Sessions (#30): title, folder and age; Continue Here or Open in Terminal.
@@ -547,6 +580,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let id = m.string("utterance_id"), id == dropped { return }
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
+        case "show_panel":
+            if let p = PanelContent(message: m.fields) { panels.show(p) }
+        case "dismiss_panel" where (m.string("id") ?? "").hasPrefix("panel-"):
+            panels.dismiss(m.string("id") ?? "")
         case "open_terminal":
             if let cmd = m.string("command") {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")

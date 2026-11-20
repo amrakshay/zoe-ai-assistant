@@ -18,6 +18,7 @@ from typing import Awaitable, Callable
 
 from . import actions
 from .policy import BUILTIN_READ, CONNECTOR_READ, Decision, Policy, decide  # noqa: F401 (re-exported)
+from .taint import Taint
 
 
 @dataclass(frozen=True)
@@ -51,17 +52,20 @@ def _out(decision: str, reason: str) -> dict:
 
 
 class Gate:
-    def __init__(self, approver: Approver | None = None, session_id: Callable[[], str | None] | None = None):
+    def __init__(self, approver: Approver | None = None, session_id: Callable[[], str | None] | None = None,
+                 taint: Taint | None = None):
         self.approver = approver
         self._session = session_id or (lambda: None)
+        self.taint = taint or Taint()
 
     async def pre_tool_use(self, input_data: dict, tool_use_id: str | None, context) -> dict:
         name = input_data.get("tool_name")
         tool_input = input_data.get("tool_input") or {}
-        d: Decision = decide(name, tool_input)
+        d: Decision = self.taint.adjust(str(name), tool_input, decide(name, tool_input))
         sid = self._session()
         if d.policy is Policy.ALLOW:
             actions.log_decision(str(name), tool_input, "allow", "policy", d.reason, sid)
+            self.taint.observe(str(name))           # its result enters Claude's context
             return _out("allow", d.reason)
         if d.policy is Policy.DENY:
             actions.log_decision(str(name), tool_input, "deny", "policy", d.reason, sid)
@@ -77,6 +81,7 @@ class Gate:
             ans = Answer(False, ans.via)          # a click-only tool approved any other way is still a deny
         actions.log_decision(str(name), tool_input, "allow" if ans.approved else "deny", ans.via, d.reason, sid)
         if ans.approved:
+            self.taint.observe(str(name))
             return _out("allow", f"approved by the user ({ans.via})")
         return _out("deny", DECLINED if ans.via in ("click", "voice") else NOT_ANSWERED)
 

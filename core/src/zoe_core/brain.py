@@ -134,6 +134,7 @@ class Brain:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
+        self.gate.taint.user_said(text)          # domains I name myself don't need approval (#18)
         if READ_ALL.match(text.strip()) and self.last_reply:
             await self._read_all(uid)
             return

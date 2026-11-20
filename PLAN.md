@@ -341,6 +341,7 @@ All reused code is MIT-licensed, keeps its headers, and is listed in `NOTICE.md`
    - connector results (email, Slack, Jira, web pages)
 
    In a tainted turn, every network-egress tool (`WebFetch`, `WebSearch`, `open_url`, `show_image` with a URL) asks, unless the domain appears in my own utterance.
+   **As built (#18):** taint sticks for the whole session, not just the turn, because what Claude has read stays in its context for later turns. Web results themselves taint too. A search always asks once tainted; a fetch doesn't if I named its domain (or a parent domain) myself earlier in the session.
 6. **Approval cards come from the core, not from Claude.**
    - Each tool has a renderer (for example "Send to #channel: <exact text>"), falling back to raw JSON input.
    - Claude's own description of the action isn't shown, so injected text can't misdescribe it.

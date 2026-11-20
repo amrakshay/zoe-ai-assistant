@@ -1,4 +1,8 @@
-"""Claude Code brain (#2): one Agent SDK session on my own login, streamed sentence by sentence.
+"""Claude Code brain (#2, #26): Agent SDK sessions on my own login, streamed sentence by sentence.
+
+- Several sessions, one active (#26): each has its own folder, SDK client, gate state (taint) and handoff state.
+  The local router (router.py) picks the session for each utterance; at most `MAX_LIVE` Claude Code processes
+  stay connected, and older ones are closed and resumed by id when needed.
 
 - Runs on the stored claude.ai login: ANTHROPIC_API_KEY and CLAUDE_* variables inherited from a host are
   removed before the CLI starts (F01).
@@ -21,7 +25,10 @@ from .renderers import render
 from .terminal import TerminalHandoff
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
+from .router import SessionInfo, route
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
+
+MAX_LIVE = 2      # Claude Code processes kept connected (each is ~250–600 MB)
 
 PERSONA = """
 You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, then shown in a small bubble.
@@ -68,29 +75,97 @@ def resume_command(session_id: str) -> str:
     return f"if command -v claude >/dev/null; then claude --resume {sid}; else {shlex.quote(bundled)} --resume {sid}; fi"
 
 
+def home() -> str:
+    return os.environ.get("ZOE_HOME", os.path.expanduser("~"))
+
+
+class Session:
+    """One Claude Code session: its folder, SDK client, gate (with its own taint) and handoff state."""
+    _keys = 0
+
+    def __init__(self, cwd: str, gate: Gate, session_id: str | None = None):
+        Session._keys += 1
+        self.key = Session._keys
+        self.cwd, self.gate, self.session_id = cwd, gate, session_id
+        self.client = None
+        self._connecting: asyncio.Task | None = None
+        self.last_used = 0.0
+        # Handoff (#20): once opened in Terminal, Zoe never writes to it again; the next turn forks it.
+        self.handed_off: str | None = None
+        self.fork_next = False
+
+    def info(self) -> SessionInfo:
+        return SessionInfo(self.key, self.cwd, self.last_used)
+
+
 class Brain:
     def __init__(self, send: Send, index=None) -> None:
         self.index = index        # the session index (#24); None in tests
         self.projects = None      # repos and aliases (#25), loaded in the background at start
+        self._projects_loading: asyncio.Task | None = None
         self.send = send
-        self.client = None
-        self.session_id: str | None = None
         self.last_reply = ""
-        self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
         self.names = Names()
         self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id,
                                    index=index)
-        self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
-        # Handoff (#20): once the session is opened in Terminal, Zoe never writes to it again; the next turn
-        # forks it (the terminal keeps the original). PLAN.md §5.10.
-        self.handed_off: str | None = None
-        self.fork_next = False
+        self.sessions: list[Session] = []
+        self.active = self.new_session(home())
+
+    def new_session(self, cwd: str, session_id: str | None = None) -> Session:
+        s = Session(cwd, Gate(approver=self.approvals.ask, session_id=lambda: self.session_id), session_id)
+        self.sessions.append(s)
+        return s
+
+    # The active session's state, under the names phase 1–2 used.
+    client = property(lambda self: self.active.client, lambda self, v: setattr(self.active, "client", v))
+    session_id = property(lambda self: self.active.session_id, lambda self, v: setattr(self.active, "session_id", v))
+    _connecting = property(lambda self: self.active._connecting, lambda self, v: setattr(self.active, "_connecting", v))
+    handed_off = property(lambda self: self.active.handed_off, lambda self, v: setattr(self.active, "handed_off", v))
+    fork_next = property(lambda self: self.active.fork_next, lambda self, v: setattr(self.active, "fork_next", v))
+    gate = property(lambda self: self.active.gate)
 
     @property
     def cwd(self) -> str:
-        return os.environ.get("ZOE_HOME", os.path.expanduser("~"))
+        return self.active.cwd
+
+    async def choose(self, text: str) -> None:
+        """Route an utterance (#26): make the right session active, and tell the app where Zoe is."""
+        if self.projects is None and self._projects_loading is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._projects_loading), 2)
+            except Exception:  # noqa: BLE001 — route without projects
+                pass
+        now = time.time()
+        r = route(text, now, self.active.info(), [s.info() for s in self.sessions], self.projects, home())
+        target = next((s for s in self.sessions if s.key == r.key), None) if r.action == "continue" else None
+        if target is None and r.action == "continue":
+            target = self.active
+        if target is None:
+            target = self.new_session(r.cwd)
+        switched = target is not self.active
+        self.active = target
+        log(f"route: {r.action} in {r.cwd} ({r.reason})")
+        if switched or r.action == "new":
+            await self.send("session_state", session_id=target.session_id, cwd=target.cwd,
+                            name=os.path.basename(target.cwd.rstrip("/")) if target.cwd != home() else "",
+                            handed_off=bool(target.handed_off))
+        await self.close_extra()
+
+    async def close_extra(self) -> None:
+        """Keep at most MAX_LIVE Claude Code processes; the rest close and resume by id later."""
+        live = sorted((s for s in self.sessions if s.client is not None and s is not self.active),
+                      key=lambda s: s.last_used, reverse=True)
+        for s in live[MAX_LIVE - 1:]:
+            try:
+                await s.client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            s.client, s._connecting = None, None
+            if self.index is not None and s.session_id:
+                self.index.set_status(s.session_id, "idle")
+            log(f"closed idle session {str(s.session_id)[:8]} in {s.cwd}")
 
     async def hand_off(self) -> dict | None:
         """Open this session in Terminal (#20): stop the turn (pending approvals are denied), close Zoe's own
@@ -122,7 +197,8 @@ class Brain:
             self.fork_next = True
             self.warm_up()
 
-    def options(self):
+    def options(self, session: Session | None = None):
+        s = session or self.active
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultAllow, PermissionResultDeny
 
         async def can_use_tool(tool_name, tool_input, ctx):
@@ -139,18 +215,18 @@ class Brain:
         sources = os.environ.get("ZOE_SETTING_SOURCES", "user,project,local")
         return ClaudeAgentOptions(
             model=model,
-            cwd=self.cwd,
+            cwd=s.cwd,
             setting_sources=[s for s in sources.split(",") if s],
             tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use],
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[s.gate.pre_tool_use],
                                                           timeout=self.approvals.timeout + 30, on_failure="block")],
                    "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
                    "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
             can_use_tool=can_use_tool,
             include_partial_messages=True,
-            resume=self.session_id,
-            fork_session=bool(self.fork_next and self.session_id),
+            resume=s.session_id,
+            fork_session=bool(s.fork_next and s.session_id),
         )
 
     async def load_projects(self) -> None:
@@ -166,18 +242,19 @@ class Brain:
             log("projects unavailable:", repr(e))
 
     def warm_up(self) -> None:
-        if self._connecting is None:
-            self._connecting = asyncio.create_task(self._connect())
+        s = self.active
+        if s._connecting is None:
+            s._connecting = asyncio.create_task(self._connect(s))
 
-    async def _connect(self) -> None:
+    async def _connect(self, s: Session) -> None:
         from claude_agent_sdk import ClaudeSDKClient
 
         scrub_env()
         t0 = time.monotonic()
-        client = ClaudeSDKClient(options=self.options())
+        client = ClaudeSDKClient(options=self.options(s))
         await client.connect()
-        self.client = client
-        log(f"connected in {time.monotonic() - t0:.2f} s")
+        s.client = client
+        log(f"connected in {time.monotonic() - t0:.2f} s ({s.cwd})")
 
     async def ready(self) -> None:
         self.warm_up()
@@ -218,10 +295,11 @@ class Brain:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
-        self.gate.taint.user_said(text)          # domains I name myself don't need approval (#18)
         if READ_ALL.match(text.strip()) and self.last_reply:
             await self._read_all(uid)
             return
+        await self.choose(text)
+        self.gate.taint.user_said(text)          # the chosen session's gate (#18, #26)
         t0 = time.monotonic()
         first = None
         splitter = SentenceSplitter()
@@ -277,6 +355,7 @@ class Brain:
                         self.fork_next, self.handed_off = False, None
                         await self.send("session_state", session_id=m.session_id, handed_off=False, forked=True)
                     self.session_id = m.session_id
+                    self.active.last_used = time.time()
             got = splitter.flush()
             await say(got, splitter.breaks)
             for line in spoken.finish():
@@ -303,8 +382,9 @@ class Brain:
 
     async def close(self) -> None:
         await self.interrupt()
-        if self.client:
-            try:
-                await self.client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
+        for s in self.sessions:
+            if s.client:
+                try:
+                    await s.client.disconnect()
+                except Exception:  # noqa: BLE001
+                    pass

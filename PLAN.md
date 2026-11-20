@@ -432,7 +432,7 @@ voice-assistant/
 - [ ] **Per-process input detection** for calls (CoreAudio process objects), and whether two voice-processing apps at once cause trouble.
 - [ ] **Footprint of one Claude Code process.**
 - [ ] **Rive** in a transparent, borderless panel.
-- [ ] **Two writers / fork** behaviour with `claude --resume` (phase 2).
+- [x] **Two writers / fork** behaviour with `claude --resume` (phase 2, #20): on handoff Zoe closes its own connection; the next turn resumes with `fork_session`, gets a new session id with the full context, and the original session's file is never written again (checked: the fork's turn appears only in the new file).
 - [ ] **Paste reliability** in Slack, Chrome and IDEs (phase 5).
 - [ ] **Concurrency limits** for parallel sessions on my subscription (phase 6).
 - [ ] **Watcher APIs** that can be polled directly with Keychain tokens (phase 7).

@@ -49,6 +49,19 @@ def scrub_env() -> None:
             os.environ.pop(k, None)
 
 
+def resume_command(session_id: str) -> str:
+    """`claude --resume <id>`: my own claude if it's on the PATH, else the copy the Agent SDK ships (same login and
+    settings either way)."""
+    import shlex
+    try:
+        import claude_agent_sdk
+        bundled = os.path.join(os.path.dirname(claude_agent_sdk.__file__), "_bundled", "claude")
+    except Exception:  # noqa: BLE001
+        bundled = "claude"
+    sid = shlex.quote(session_id)
+    return f"if command -v claude >/dev/null; then claude --resume {sid}; else {shlex.quote(bundled)} --resume {sid}; fi"
+
+
 class Brain:
     def __init__(self, send: Send) -> None:
         self.send = send
@@ -60,6 +73,42 @@ class Brain:
         self.approvals = Approvals(send, render=render, session_id=lambda: self.session_id)
         self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id)
+        # Handoff (#20): once the session is opened in Terminal, Zoe never writes to it again; the next turn
+        # forks it (the terminal keeps the original). PLAN.md §5.10.
+        self.handed_off: str | None = None
+        self.fork_next = False
+
+    @property
+    def cwd(self) -> str:
+        return os.environ.get("ZOE_HOME", os.path.expanduser("~"))
+
+    async def hand_off(self) -> dict | None:
+        """Open this session in Terminal (#20): stop the turn (pending approvals are denied), close Zoe's own
+        connection so there's never a second writer, and return what the app should run. None: no session yet."""
+        if not self.session_id:
+            return None
+        sid = self.session_id
+        await self.interrupt()
+        if self._turn:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._turn), 5)
+            except Exception:  # noqa: BLE001 - cancelled or timed out; we disconnect regardless
+                pass
+        if self.client:
+            try:
+                await self.client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+        self.client, self._connecting = None, None
+        self.handed_off, self.fork_next = sid, True
+        log(f"handed off session {sid[:8]} to Terminal; the next turn forks it")
+        return {"session_id": sid, "cwd": self.cwd, "command": resume_command(sid)}
+
+    def take_back(self) -> None:
+        """Talk to Zoe again about a handed-off session: connect a fork now (the terminal keeps the original)."""
+        if self.handed_off:
+            self.fork_next = True
+            self.warm_up()
 
     def options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultAllow, PermissionResultDeny
@@ -78,7 +127,7 @@ class Brain:
         sources = os.environ.get("ZOE_SETTING_SOURCES", "user,project,local")
         return ClaudeAgentOptions(
             model=model,
-            cwd=os.environ.get("ZOE_HOME", os.path.expanduser("~")),
+            cwd=self.cwd,
             setting_sources=[s for s in sources.split(",") if s],
             tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
@@ -89,6 +138,7 @@ class Brain:
             can_use_tool=can_use_tool,
             include_partial_messages=True,
             resume=self.session_id,
+            fork_session=bool(self.fork_next and self.session_id),
         )
 
     def warm_up(self) -> None:
@@ -192,6 +242,10 @@ class Brain:
                             got = splitter.flush()
                             await say(got, splitter.breaks)
                 elif isinstance(m, ResultMessage):
+                    if self.fork_next and m.session_id != self.handed_off:
+                        log(f"forked {str(self.handed_off)[:8]} → {m.session_id[:8]}")
+                        self.fork_next, self.handed_off = False, None
+                        await self.send("session_state", session_id=m.session_id, handed_off=False, forked=True)
                     self.session_id = m.session_id
             got = splitter.flush()
             await say(got, splitter.breaks)

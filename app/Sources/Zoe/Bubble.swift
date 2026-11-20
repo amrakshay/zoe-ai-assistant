@@ -96,6 +96,7 @@ struct BubbleView: View {
     var qs: QuestionState? = nil
     var onQuestion: (QuestionAction) -> Void = { _ in }
     var onTerminal: (String, Bool) -> Void = { _, _ in }      // (id, open)
+    var onHandOff: () -> Void = {}                             // the way out: the whole conversation in Terminal
 
     enum QuestionAction { case choose(String), toggle(String), done, other, send }
 
@@ -170,6 +171,7 @@ struct BubbleView: View {
                 if more > 0 { Text("+\(more) more waiting").font(.caption).foregroundStyle(.secondary) }
                 if !a.voiceOK { Text("Needs a click").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
+                Button { onHandOff() } label: { Image(systemName: "terminal") }.help("Open this conversation in Terminal instead")
                 Button("Deny") { onAnswer(a.id, false) }
                 Button("Approve") { onAnswer(a.id, true) }.buttonStyle(.borderedProminent)
             }
@@ -211,6 +213,7 @@ struct BubbleView: View {
                 if card.questions.count > 1 { Text("\(state.index + 1) of \(card.questions.count)").font(.caption).foregroundStyle(.secondary) }
                 if more > 0 { Text("+\(more) more waiting").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
+                Button { onHandOff() } label: { Image(systemName: "terminal") }.help("Open this conversation in Terminal instead")
                 if !state.typing { Button("Other…") { onQuestion(.other) } }
                 if q.multi { Button("Done") { onQuestion(.done) }.disabled(state.selected.isEmpty) }
             }
@@ -251,6 +254,8 @@ final class BubbleWindow {
     var onQuestionAnswered: ((String, [String: String]) -> Void)?
     /// A terminal card was opened or dismissed: (card, opened).
     var onTerminalDone: ((TerminalCard, Bool) -> Void)?
+    /// A card's way out: open the whole conversation in Terminal (#20).
+    var onHandOff: (() -> Void)?
 
     func showTerminal(_ t: TerminalCard) {
         hideTask?.cancel()
@@ -410,7 +415,7 @@ final class BubbleWindow {
         }
         func view(_ w: CGFloat?) -> BubbleView {
             BubbleView(model: shown, hover: hover, width: w, onClose: close, onAnswer: answer, qs: qs, onQuestion: qa,
-                       onTerminal: term)
+                       onTerminal: term, onHandOff: { [weak self] in self?.onHandOff?() })
         }
         func measure(_ w: CGFloat?) -> NSSize { NSHostingView(rootView: view(w)).fittingSize }
         let pad: CGFloat = 6 * 2          // the outer padding; `width` includes the inner one

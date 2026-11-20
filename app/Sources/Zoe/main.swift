@@ -54,6 +54,21 @@ if let i = args.firstIndex(of: "--smoke") {
                 if turn < texts.count {
                     firstSay = nil; sentAt = Date()
                     print("> \(texts[turn])")
+                    if texts[turn] == "<<handoff>>" {      // Open in Terminal (not actually opened in smoke mode)
+                        link.send(CoreMessage("open_session", ["where": "terminal"]))
+                    } else {
+                        link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
+                    }
+                } else { done.signal() }
+            }
+        case "open_terminal":
+            print("open_terminal in \(m.string("cwd") ?? "?"): resume \(m.string("session_id") ?? "?")")
+        case "session_state":
+            print("session_state: \(m.string("session_id") ?? "?") handed_off=\(m["handed_off"] ?? "") forked=\(m["forked"] ?? false)")
+            if (m["handed_off"] as? Bool) == true {   // move on to the next scripted line
+                turn += 1
+                if turn < texts.count {
+                    sentAt = Date(); print("> \(texts[turn])")
                     link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
                 } else { done.signal() }
             }
@@ -287,6 +302,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let character = CharacterWindow()
     private lazy var bubble = BubbleWindow(anchor: character.panel)
     private let characterItem = NSMenuItem(title: "Hide Character", action: #selector(toggleCharacter), keyEquivalent: "h")
+    private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
+    private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
+    private var handedOff = false
     private var coreOffline = false
     private var voiceState: TurnMachine.UIState = .idle
 
@@ -301,6 +319,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(characterItem)
+        menu.addItem(terminalItem)
+        menu.addItem(takeBackItem)
+        menu.autoenablesItems = false
+        takeBackItem.isEnabled = false
         menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
@@ -335,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.approvalClosed(id: id)
             self.voice.speak("Okay.")
         }
+        bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
         bubble.onTerminalDone = { [weak self] card, open in
             guard let self else { return }
             self.link.resolveLocally(card.id)
@@ -390,6 +413,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Hands the conversation to Terminal (`claude --resume`), so Zoe stops writing to it (#20).
+    @objc private func openConversationInTerminal() {
+        link.send(CoreMessage("open_session", ["where": "terminal"]))
+    }
+
+    /// Talk to Zoe again about the handed-off conversation: the core forks it.
+    @objc private func takeBack() {
+        link.send(CoreMessage("take_back"))
+        takeBackItem.isEnabled = false
+    }
+
     @objc private func toggleCharacter() {
         if character.isVisible { character.hide(); bubble.hide(); characterItem.title = "Show Character" }
         else { character.show(); characterItem.title = "Hide Character" }
@@ -438,6 +472,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let id = m.string("utterance_id"), id == dropped { return }
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
+        case "open_terminal":
+            if let cmd = m.string("command") {
+                openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
+                voice.endConversation()
+            }
+        case "session_state":
+            handedOff = (m["handed_off"] as? Bool) == true
+            takeBackItem.isEnabled = handedOff
+            if (m["forked"] as? Bool) == true { print("[metrics] handed-off conversation forked") }
         case "pending_input" where m.string("kind") == "terminal":
             guard let t = TerminalCard(message: m.fields) else { return }
             bubble.showTerminal(t)

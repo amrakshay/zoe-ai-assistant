@@ -245,7 +245,12 @@ struct BubbleView: View {
 /// The bubble's panel, placed next to the character and resized to fit its content.
 @MainActor
 final class BubbleWindow {
-    private(set) var model = BubbleContent()
+    private(set) var model = BubbleContent() {
+        didSet { if model.waiting != oldValue.waiting { onWaitingChanged?(model.waiting) } }
+    }
+    /// The number of cards waiting for me changed (for the character's badge, #21).
+    var onWaitingChanged: ((Int) -> Void)?
+    var isVisible: Bool { panel.isVisible }
     private let hover = BubbleHover()
     let panel: NSPanel
     private let host: NSHostingView<BubbleView>

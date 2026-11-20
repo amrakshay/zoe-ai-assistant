@@ -230,10 +230,11 @@ if args.contains("--ui-demo") {
                 "title": "Run a command?", "fields": [["label": "Command", "value": "git push origin main", "mono": true]],
                 "why": "Runs a command: needs a click."] as [String: Any]]) { bubble.showApproval(b) }
             ch.state = .thinking
+            ch.waiting = 2
             await phase("approval", 4)
-            bubble.removeApproval("demo-1")
+            bubble.removeApproval("demo-1"); ch.waiting = 1
             await phase("approval2", 3)
-            bubble.removeApproval("demo-2")
+            bubble.removeApproval("demo-2"); ch.waiting = 0
             ch.state = .offline; bubble.hide(); await phase("offline", 2)
             ch.state = .idle; await phase("idle-after", 6)
             var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
@@ -331,7 +332,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startLink()
         voice.onStatus = { [weak self] s in self?.voiceItem.title = "Voice: \(s)"; print("voice: \(s)") }
-        character.onClick = { [weak self] in self?.voice.click() }
+        character.onClick = { [weak self] in
+            guard let self else { return }
+            // Something waits but its card isn't on screen: bring it back instead of starting to listen (#21).
+            if self.bubble.waiting > 0 && !self.bubble.isVisible { self.bubble.relayout(); return }
+            self.voice.click()
+        }
+        bubble.onWaitingChanged = { [weak self] n in self?.character.waiting = n }
         character.onMove = { [weak self] in self?.bubble.relayout() }
         character.show()
         voice.onMicLevel = { [weak self] v in self?.character.level(v) }

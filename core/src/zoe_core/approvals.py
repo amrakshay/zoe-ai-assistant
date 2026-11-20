@@ -22,7 +22,7 @@ from .policy import Policy
 Send = Callable[..., Awaitable[None]]
 Render = Callable[[ApprovalRequest], dict]
 
-VALID_VIA = {"click", "voice", "text"}
+VALID_VIA = {"click", "voice", "text", "terminal"}
 
 
 def default_timeout() -> float:
@@ -109,7 +109,7 @@ class Approvals:
         value = msg.get("value")
         via = msg.get("via") if msg.get("via") in VALID_VIA else "click"
         if str(pid).startswith("ap-"):
-            value = "approve" if value == "approve" else "deny"
+            value = "approve" if value == "approve" and via != "terminal" else "deny"
         fut.set_result((value, via))
         return True
 

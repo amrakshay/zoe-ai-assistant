@@ -146,3 +146,20 @@ def test_unanswered_or_empty_questions_return_none():
     assert asyncio.run(ask_question(None))[0] is None                  # timeout
     assert asyncio.run(ask_question({"Which format?": "  "}))[0] is None
     assert asyncio.run(Approvals(Wire()).question({"questions": []})) is None
+
+
+def test_run_in_terminal_is_a_deny_with_its_own_message():
+    async def go():
+        w = Wire()
+        from zoe_core.renderers import render
+        ap = Approvals(w, render=render, timeout=1)
+        g = Gate(approver=ap.ask)
+        hook = asyncio.create_task(g.pre_tool_use({"tool_name": "Bash", "tool_input": {"command": "sudo true"}, "cwd": "/repo"}, "tu", None))
+        while not any(t == "pending_input" for t, _ in w.sent):
+            await asyncio.sleep(0)
+        msg = w.last("pending_input")
+        assert msg["card"]["terminal"] == {"command": "sudo true", "cwd": "/repo"}
+        ap.answer({"pending_id": msg["id"], "value": "approve", "via": "terminal"})
+        return (await hook)["hookSpecificOutput"]
+    h = asyncio.run(go())
+    assert h["permissionDecision"] == "deny" and "Terminal themselves" in h["permissionDecisionReason"]

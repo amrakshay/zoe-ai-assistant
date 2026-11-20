@@ -369,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.speak("Okay.")
         }
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
+        bubble.onRunInTerminal = { [weak self] card in
+            guard let self, let t = card.terminal else { return }
+            self.link.answer(pendingID: card.id, value: "deny", via: "terminal")   // Zoe doesn't run it
+            self.bubble.removeApproval(card.id)
+            self.voice.approvalClosed(id: card.id)
+            self.openInTerminal(command: t.command, cwd: t.cwd)
+        }
         bubble.onTerminalDone = { [weak self] card, open in
             guard let self else { return }
             self.link.resolveLocally(card.id)
@@ -417,7 +424,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let url = try TerminalScript.write(command: command, cwd: cwd)
             let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
-            NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+            // Zoe never takes focus, so macOS won't let it bring another app forward unless it hands focus over:
+            // become active for a moment, yield to Terminal, and ask Terminal forward once it has the window.
+            NSApp.activate()
+            NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.Terminal")
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: cfg) { app, error in
+                if let error { print("couldn't open Terminal: \(error)"); return }
+                DispatchQueue.main.async { _ = app?.activate(from: .current, options: []) }
+            }
             print("[metrics] opened in Terminal")
         } catch {
             print("couldn't open Terminal: \(error)")

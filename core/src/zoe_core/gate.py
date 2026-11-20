@@ -28,12 +28,13 @@ class ApprovalRequest:
     policy: Policy          # ASK or CLICK
     reason: str
     tool_use_id: str | None
+    cwd: str = ""           # the session's folder (where a command would run)
 
 
 @dataclass(frozen=True)
 class Answer:
     approved: bool
-    via: str                # click | voice | timeout | restart | interrupt | error
+    via: str                # click | voice | terminal | timeout | restart | interrupt | error
 
 
 Approver = Callable[[ApprovalRequest], Awaitable[Answer]]
@@ -44,6 +45,8 @@ NO_APPROVALS = (
 )
 DECLINED = "The user declined this. Don't retry it; say briefly that you didn't do it."
 NOT_ANSWERED = "The user didn't approve this in time, so it was not done. Don't retry it unless they ask again."
+IN_TERMINAL = ("The user chose to run this command in Terminal themselves, so it was not run here. Don't run or retry "
+               "it; say in one short sentence that it's open in Terminal.")
 
 
 def _out(decision: str, reason: str) -> dict:
@@ -78,7 +81,8 @@ class Gate:
             actions.log_decision(str(name), tool_input, "deny", "no-approver", d.reason, sid)
             return _out("deny", NO_APPROVALS)
         try:
-            ans = await self.approver(ApprovalRequest(name, tool_input, d.policy, d.reason, tool_use_id))
+            ans = await self.approver(ApprovalRequest(name, tool_input, d.policy, d.reason, tool_use_id,
+                                                      str(input_data.get("cwd") or "")))
         except Exception:  # noqa: BLE001 — any failure while asking is a deny
             ans = Answer(False, "error")
         if d.policy is Policy.CLICK and ans.approved and ans.via != "click":
@@ -87,6 +91,8 @@ class Gate:
         if ans.approved:
             self.taint.observe(str(name))
             return _out("allow", f"approved by the user ({ans.via})")
+        if ans.via == "terminal":
+            return _out("deny", IN_TERMINAL)
         return _out("deny", DECLINED if ans.via in ("click", "voice") else NOT_ANSWERED)
 
 

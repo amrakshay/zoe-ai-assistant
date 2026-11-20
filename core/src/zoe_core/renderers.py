@@ -84,9 +84,12 @@ def raw_card(req: ApprovalRequest, title: str | None = None) -> dict:
 def _bash(req: ApprovalRequest) -> dict:
     cmd = req.tool_input.get("command", "")
     fields = [field("Command", cmd, mono=True)]
+    if req.cwd:
+        fields.append(field("In folder", req.cwd, mono=True))
     if req.tool_input.get("run_in_background"):
         fields.append(field("Runs", "in the background"))
-    return {"title": "Run a command?", "fields": fields,
+    # The card's terminal button runs exactly this, in Terminal, instead of letting Zoe run it.
+    return {"title": "Run a command?", "fields": fields, "terminal": {"command": cmd, "cwd": req.cwd},
             "summary": "Zoe wants to run a command. It's on screen.", "why": req.reason}
 
 

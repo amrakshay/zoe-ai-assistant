@@ -70,10 +70,20 @@ struct ApprovalCard: Equatable {
     var fields: [Field]
     var why: String
     var voiceOK: Bool
+    /// A command card's "run it in Terminal myself" target (#22 feedback).
+    var terminal: (command: String, cwd: String)?
+
+    static func == (a: ApprovalCard, b: ApprovalCard) -> Bool {
+        a.id == b.id && a.title == b.title && a.fields == b.fields && a.why == b.why && a.voiceOK == b.voiceOK
+            && a.terminal?.command == b.terminal?.command && a.terminal?.cwd == b.terminal?.cwd
+    }
 
     init?(message m: [String: Any]) {
         guard let id = m["id"] as? String, let card = m["card"] as? [String: Any] else { return nil }
         self.id = id
+        if let t = card["terminal"] as? [String: Any], let c = t["command"] as? String {
+            terminal = (c, t["cwd"] as? String ?? "")
+        }
         title = card["title"] as? String ?? "Allow this?"
         fields = (card["fields"] as? [[String: Any]] ?? []).map {
             Field(label: $0["label"] as? String ?? "", value: $0["value"] as? String ?? "", mono: $0["mono"] as? Bool ?? false)
@@ -97,6 +107,7 @@ struct BubbleView: View {
     var onQuestion: (QuestionAction) -> Void = { _ in }
     var onTerminal: (String, Bool) -> Void = { _, _ in }      // (id, open)
     var onHandOff: () -> Void = {}                             // the way out: the whole conversation in Terminal
+    var onRunInTerminal: (String) -> Void = { _ in }           // a command card: run it in Terminal myself
 
     enum QuestionAction { case choose(String), toggle(String), done, other, send }
 
@@ -171,7 +182,12 @@ struct BubbleView: View {
                 if more > 0 { Text("+\(more) more waiting").font(.caption).foregroundStyle(.secondary) }
                 if !a.voiceOK { Text("Needs a click").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button { onHandOff() } label: { Image(systemName: "terminal") }.help("Open this conversation in Terminal instead")
+                if a.terminal != nil {
+                    Button { onRunInTerminal(a.id) } label: { Label("Run in Terminal", systemImage: "terminal") }
+                        .help("Run this exact command in Terminal yourself; Zoe won't run it")
+                } else {
+                    Button { onHandOff() } label: { Image(systemName: "terminal") }.help("Open this conversation in Terminal instead")
+                }
                 Button("Deny") { onAnswer(a.id, false) }
                 Button("Approve") { onAnswer(a.id, true) }.buttonStyle(.borderedProminent)
             }
@@ -261,6 +277,8 @@ final class BubbleWindow {
     var onTerminalDone: ((TerminalCard, Bool) -> Void)?
     /// A card's way out: open the whole conversation in Terminal (#20).
     var onHandOff: (() -> Void)?
+    /// A command card's "Run in Terminal": (card).
+    var onRunInTerminal: ((ApprovalCard) -> Void)?
 
     func showTerminal(_ t: TerminalCard) {
         hideTask?.cancel()
@@ -420,7 +438,11 @@ final class BubbleWindow {
         }
         func view(_ w: CGFloat?) -> BubbleView {
             BubbleView(model: shown, hover: hover, width: w, onClose: close, onAnswer: answer, qs: qs, onQuestion: qa,
-                       onTerminal: term, onHandOff: { [weak self] in self?.onHandOff?() })
+                       onTerminal: term, onHandOff: { [weak self] in self?.onHandOff?() },
+                       onRunInTerminal: { [weak self] id in
+                           guard let self, let a = self.model.approvals.first(where: { $0.id == id }) else { return }
+                           self.onRunInTerminal?(a)
+                       })
         }
         func measure(_ w: CGFloat?) -> NSSize { NSHostingView(rootView: view(w)).fittingSize }
         let pad: CGFloat = 6 * 2          // the outer padding; `width` includes the inner one

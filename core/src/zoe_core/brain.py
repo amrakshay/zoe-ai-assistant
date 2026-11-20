@@ -142,6 +142,10 @@ class Brain:
         now = time.time()
         r = route(text, now, self.active.info(), [s.info() for s in self.sessions], self.projects, home())
         target = next((s for s in self.sessions if s.key == r.key), None) if r.action == "continue" else None
+        if r.resume_request or r.ambiguous:
+            picked = await self.ask_router(text, r)
+            if picked is not None:
+                target, r.action = picked, "resume"
         if target is None and r.action == "continue":
             target = self.active
         if target is None:
@@ -159,6 +163,37 @@ class Brain:
                             name=os.path.basename(target.cwd.rstrip("/")) if target.cwd != home() else "",
                             handed_off=bool(target.handed_off))
         await self.close_extra()
+
+    async def ask_router(self, text: str, r) -> Session | None:
+        """The Claude router (#27): which earlier session (or which of several projects) the request means.
+        Returns the session to use, or None to keep the local router's choice."""
+        from .claude_router import pick_project, pick_session
+        from .quick import ask_json
+        if r.ambiguous and self.projects is not None:
+            cands = [self.projects.items[p] for p in r.ambiguous if p in self.projects.items]
+            pk = await pick_project(text, cands, ask_json)
+            log(f"router (projects): {pk.index} — {pk.reason} ({pk.seconds:.1f} s)")
+            if pk.index is not None:
+                path = cands[pk.index].path
+                here = [s for s in self.sessions if s.cwd == path]
+                return max(here, key=lambda s: s.last_used) if here else self.new_session(path)
+            return None
+        if self.index is None:
+            return None
+        recent = [s for s in self.index.recent(limit=15, since=time.time() - 3 * 86400) if s.get("session_id")]
+        pk = await pick_session(text, recent, ask_json)
+        log(f"router (sessions): {pk.index} — {pk.reason} ({pk.seconds:.1f} s)")
+        if pk.index is None:
+            return None
+        row = recent[pk.index]
+        sid = row["session_id"]
+        live = next((s for s in self.sessions if s.session_id == sid), None)
+        if live is not None and not live.handed_off:
+            return live
+        s = live or self.new_session(row["cwd"], session_id=sid)       # resumes by id, in its stored folder
+        if row.get("status") == "handed_off" or (live and live.handed_off):
+            s.handed_off, s.fork_next = sid, True                         # never a second writer: fork it
+        return s
 
     def summarise_soon(self, s: Session) -> None:
         """Title and one-line summary of a session's new turns, by Haiku, in the background (#28)."""

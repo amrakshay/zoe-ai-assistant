@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable
 
 from .approvals import Approvals
 from .renderers import render
+from .terminal import TerminalHandoff
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
@@ -58,12 +59,19 @@ class Brain:
         self._turn: asyncio.Task | None = None
         self.approvals = Approvals(send, render=render, session_id=lambda: self.session_id)
         self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
+        self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id)
 
     def options(self):
-        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultDeny
+        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultAllow, PermissionResultDeny
 
-        async def deny_all(tool_name, tool_input, ctx):  # final catch-all: the hook already decided
-            return PermissionResultDeny(message="Blocked: not on Zoe's read-only allowlist.")
+        async def can_use_tool(tool_name, tool_input, ctx):
+            # Only AskUserQuestion is meant to get here (the hook decides everything else); the rest is denied.
+            if tool_name == "AskUserQuestion":
+                updated = await self.approvals.question(tool_input)
+                if updated is not None:
+                    return PermissionResultAllow(updated_input=updated)
+                return PermissionResultDeny(message="The user didn't answer. Don't ask again; go on without it or stop.")
+            return PermissionResultDeny(message="Blocked: this didn't go through Zoe's approval gate.")
 
         # Sonnet by default: warm calendar turn 3.7 s to the first sentence (Haiku 2.7 s, my default Opus ~8 s).
         model = os.environ.get("ZOE_MODEL", "claude-sonnet-5-5")
@@ -75,8 +83,10 @@ class Brain:
             tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use],
-                                                          timeout=self.approvals.timeout + 30, on_failure="block")]},
-            can_use_tool=deny_all,
+                                                          timeout=self.approvals.timeout + 30, on_failure="block")],
+                   "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
+                   "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
+            can_use_tool=can_use_tool,
             include_partial_messages=True,
             resume=self.session_id,
         )

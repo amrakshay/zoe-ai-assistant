@@ -80,7 +80,7 @@ def test_extra_allowed_via_env(monkeypatch):
 def test_enabled_builtins_are_all_in_the_table():
     for n in ENABLED_BUILTINS:
         assert decide(n, {}).policy is not Policy.DENY or n == "ExitPlanMode"
-    assert "AskUserQuestion" not in ENABLED_BUILTINS        # until #19
+    assert "AskUserQuestion" in ENABLED_BUILTINS
 
 
 # --- protected paths ---------------------------------------------------------------------------------------
@@ -135,6 +135,11 @@ def approver(approved, via, seen=None):
             seen.append(req)
         return Answer(approved, via)
     return f
+
+
+def test_ask_user_question_gets_no_decision_from_the_hook():
+    out = run(Gate(approver(True, "click")).pre_tool_use({"tool_name": "AskUserQuestion", "tool_input": {"questions": []}}, "t", None))
+    assert out == {}       # falls through to can_use_tool
 
 
 def test_ask_goes_to_the_approver():

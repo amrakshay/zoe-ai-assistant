@@ -47,8 +47,8 @@ BUILTIN_EDIT = frozenset({"Edit", "Write", "NotebookEdit"})
 BUILTIN_PLUMBING = frozenset({"TodoWrite", "ToolSearch"})
 
 #: The built-ins the session may use at all (ClaudeAgentOptions.tools). Anything else isn't loaded.
-#: AskUserQuestion stays off until #19: a hook "allow" would skip can_use_tool, where its answers go.
-ENABLED_BUILTINS = BUILTIN_READ | BUILTIN_WEB | BUILTIN_EDIT | BUILTIN_PLUMBING | {"Bash"}
+#: AskUserQuestion's answers are filled in by can_use_tool; the gate gives it no decision (#19).
+ENABLED_BUILTINS = BUILTIN_READ | BUILTIN_WEB | BUILTIN_EDIT | BUILTIN_PLUMBING | {"Bash", "AskUserQuestion"}
 
 # --- connector tools (claude.ai connectors, exact names) --------------------------------------------------
 

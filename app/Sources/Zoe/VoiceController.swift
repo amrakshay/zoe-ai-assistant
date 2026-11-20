@@ -32,12 +32,17 @@ final class VoiceController {
         print(String(format: "[metrics] turn %d: end of turn → %@ %.0f ms", turnNo, what, (Self.now() - turnEndAt) * 1000))
     }
     // Voice approvals (#17): one card at a time, oldest first.
-    private struct VoiceApproval { let id: String; let summary: String; let voiceOK: Bool; var retried = false }
+    private struct VoiceApproval {
+        let id: String; let summary: String; let voiceOK: Bool; var retried = false
+        var question: (text: String, labels: [String], multi: Bool)? = nil   // a question from Claude (#19)
+    }
     private var approvalQueue: [VoiceApproval] = []
     private var answering: (id: String, promptEnd: TimeInterval)?
     private var answerSpeechStart: TimeInterval?
     /// A spoken answer to an approval card: (pending id, approved).
     var onApprovalAnswer: ((String, Bool) -> Void)?
+    /// A spoken answer to Claude's question: (pending id, question text, chosen label(s) or what I said).
+    var onQuestionAnswer: ((String, String, String) -> Void)?
     private var unloadTask: Task<Void, Never>?
     /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
     var unloadAfter: Duration = .seconds(120)
@@ -178,6 +183,16 @@ final class VoiceController {
         if approvalQueue.count == 1 { promptNext() }
     }
 
+    /// Claude asked a question (#19). One question with options is read out and answered by voice; several at
+    /// once are answered on screen.
+    func questionAsked(id: String, question: String, labels: [String], multi: Bool, voiceOK: Bool) {
+        guard !approvalQueue.contains(where: { $0.id == id }) else { return }
+        let opts = labels.count > 1 ? labels.dropLast().joined(separator: ", ") + ", or " + labels.last! : labels.first ?? ""
+        let prompt = voiceOK ? "\(question) \(opts)?" : "Zoe has a few questions for you on screen."
+        approvalQueue.append(VoiceApproval(id: id, summary: prompt, voiceOK: voiceOK, question: (question, labels, multi)))
+        if approvalQueue.count == 1 { promptNext() }
+    }
+
     /// Answered by click, timed out, withdrawn, or answered by voice: forget it and move to the next one.
     func approvalClosed(id: String) {
         let wasFirst = approvalQueue.first?.id == id
@@ -191,7 +206,8 @@ final class VoiceController {
     private func promptNext() {
         guard let a = approvalQueue.first else { return }
         let listen = a.voiceOK && canListen
-        let tail = !a.voiceOK ? "This one needs a click." : listen ? "Say yes or no." : "Approve it on screen."
+        let tail = a.question != nil ? (a.voiceOK && !listen ? "Answer it on screen." : "")
+            : !a.voiceOK ? "This one needs a click." : listen ? "Say yes or no." : "Approve it on screen."
         speaker.enqueue("\(a.summary) \(tail)", onPlayed: { [weak self] in
             guard let self, listen, self.approvalQueue.first?.id == a.id else { return }
             self.startAnswering(a.id)
@@ -225,6 +241,12 @@ final class VoiceController {
                 Task { @MainActor in
                     guard let self, self.answering?.id == id else { return }
                     let text = (try? await self.stt.transcribe(samples))?.text ?? ""
+                    if let q = self.approvalQueue.first(where: { $0.id == id })?.question {
+                        let hits = OptionMatch.match(text, labels: q.labels, multiSelect: q.multi)
+                        let value = hits.isEmpty ? text.trimmingCharacters(in: .whitespacesAndNewlines) : hits.joined(separator: ", ")
+                        print("[metrics] question answered by voice: \(hits.isEmpty ? "own words" : "option")")
+                        if !value.isEmpty { self.answering = nil; self.onQuestionAnswer?(id, q.text, value); return }
+                    }
                     let answer = VoiceAnswer.accepted(speechStart: started, promptEnd: promptEnd) ? VoiceAnswer.classify(text) : .unclear
                     print("[metrics] approval answer by voice: \(answer)")
                     switch answer {

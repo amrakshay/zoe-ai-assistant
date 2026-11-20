@@ -107,3 +107,42 @@ def test_hook_end_to_end_click_only_refuses_voice():
     assert asyncio.run(go("Edit", {"file_path": "/tmp/a"}, "approve", "voice")) == "allow"
     assert asyncio.run(go("Bash", {"command": "ls"}, "approve", "voice")) == "deny"
     assert asyncio.run(go("Bash", {"command": "ls"}, "approve", "click")) == "allow"
+
+
+QS = {"questions": [
+    {"question": "Which format?", "header": "Format", "multiSelect": False,
+     "options": [{"label": "Summary", "description": "short"}, {"label": "Detailed", "description": "long"}]},
+    {"question": "Which sections?", "header": "Sections", "multiSelect": True,
+     "options": [{"label": "Intro", "description": ""}, {"label": "Outro", "description": ""}]},
+]}
+
+
+async def ask_question(answer):
+    w = Wire()
+    ap = Approvals(w, timeout=1)
+    ap.question_timeout = 0.2
+    t = asyncio.create_task(ap.question(QS))
+    while not any(x == "pending_input" for x, _ in w.sent):
+        await asyncio.sleep(0)
+    msg = w.last("pending_input")
+    if answer is not None:
+        assert ap.answer({"pending_id": msg["id"], "value": answer, "via": "click"})
+    return await t, msg
+
+
+def test_question_card_and_answers():
+    updated, msg = asyncio.run(ask_question({"Which format?": "Summary", "Which sections?": ["Intro", "Outro"]}))
+    assert msg["kind"] == "question" and msg["questions"][0]["header"] == "Format"
+    assert updated["questions"] == QS["questions"]
+    assert updated["answers"] == {"Which format?": "Summary", "Which sections?": "Intro, Outro"}
+
+
+def test_typed_answer_is_passed_through():
+    updated, _ = asyncio.run(ask_question({"Which format?": "  a haiku please "}))
+    assert updated["answers"] == {"Which format?": "a haiku please"}
+
+
+def test_unanswered_or_empty_questions_return_none():
+    assert asyncio.run(ask_question(None))[0] is None                  # timeout
+    assert asyncio.run(ask_question({"Which format?": "  "}))[0] is None
+    assert asyncio.run(Approvals(Wire()).question({"questions": []})) is None

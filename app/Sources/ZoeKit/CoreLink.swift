@@ -101,8 +101,11 @@ public final class CoreLink: @unchecked Sendable {
 
     public func start() { queue.async { self.stopping = false; self.launch() } }
 
+    /// A pending input the core doesn't wait for (a terminal card) was handled locally.
+    public func resolveLocally(_ pendingID: String) { pending.resolve(pendingID) }
+
     /// My answer to a pending input: sent to the core and no longer pending.
-    public func answer(pendingID: String, value: String, via: String) {
+    public func answer(pendingID: String, value: Any, via: String) {
         pending.resolve(pendingID)
         send(CoreMessage("answer", ["pending_id": pendingID, "value": value, "via": via,
                                     "at": Date().timeIntervalSince1970]))

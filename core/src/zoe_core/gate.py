@@ -61,6 +61,10 @@ class Gate:
     async def pre_tool_use(self, input_data: dict, tool_use_id: str | None, context) -> dict:
         name = input_data.get("tool_name")
         tool_input = input_data.get("tool_input") or {}
+        if name == "AskUserQuestion":
+            # No decision: it falls through to can_use_tool, where the answers are filled in (#19).
+            actions.log_decision(str(name), tool_input, "question", "policy", "Claude asks the user", self._session())
+            return {}
         d: Decision = self.taint.adjust(str(name), tool_input, decide(name, tool_input))
         sid = self._session()
         if d.policy is Policy.ALLOW:

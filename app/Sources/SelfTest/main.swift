@@ -171,6 +171,41 @@ do {
     check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
 }
 
+// MARK: spoken answers to Claude's questions (#19)
+print("Option matching")
+do {
+    let l = ["Summary", "Detailed report", "Skip"]
+    check("a label said in a sentence", OptionMatch.match("Detailed report, please", labels: l, multiSelect: false) == ["Detailed report"])
+    check("case and punctuation don't matter", OptionMatch.match("summary!", labels: l, multiSelect: false) == ["Summary"])
+    check("ordinals pick by position", OptionMatch.match("the second one", labels: l, multiSelect: false) == ["Detailed report"])
+    check("'last' picks the last", OptionMatch.match("the last", labels: l, multiSelect: false) == ["Skip"])
+    check("two labels for a single choice is ambiguous", OptionMatch.match("summary or skip", labels: l, multiSelect: false) == [])
+    check("multi-select takes every label said", OptionMatch.match("summary and skip", labels: l, multiSelect: true) == ["Summary", "Skip"])
+    check("'both' / 'all' in multi-select", OptionMatch.match("all of them", labels: l, multiSelect: true) == l)
+    check("a partial label isn't a match", OptionMatch.match("detailed", labels: l, multiSelect: false) == [])
+    check("no match → [] (sent as typed text)", OptionMatch.match("something else entirely", labels: l, multiSelect: false) == [])
+}
+
+// MARK: Open in Terminal scripts (#19)
+print("Terminal scripts")
+do {
+    check("quoting survives quotes", TerminalScript.quote("it's") == "'it'\\''s'")
+    let s = TerminalScript.script(command: "sudo true", cwd: "/tmp/a b'c")
+    check("goes to the folder, quoted", s.contains("cd '/tmp/a b'\\''c'"))
+    check("runs exactly the command", s.contains("\nsudo true\n"))
+    check("empty folder → home", TerminalScript.script(command: "claude", cwd: "").contains("cd $HOME"))
+    let url = try TerminalScript.write(command: "echo hi", cwd: "/tmp")
+    let p = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0
+    check("written as a private .command file", url.pathExtension == "command" && p == 0o700)
+    // It must parse as zsh.
+    let z = Process(); z.executableURL = URL(fileURLWithPath: "/bin/zsh"); z.arguments = ["-n", url.path]
+    try z.run(); z.waitUntilExit()
+    check("the script parses (zsh -n)", z.terminationStatus == 0)
+    try? FileManager.default.removeItem(at: url)
+} catch {
+    check("terminal script", false, "\(error)")
+}
+
 // MARK: supervision with a fake core
 print("Core link supervision")
 let fakeCore = """

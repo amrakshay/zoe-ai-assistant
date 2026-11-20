@@ -50,44 +50,73 @@ class Approvals:
         self.timeout = default_timeout() if timeout is None else timeout
         self._session = session_id or (lambda: None)
         self._pending: dict[str, asyncio.Future] = {}
+        self.question_timeout = max(self.timeout, 300.0)   # questions take longer to answer than yes/no
 
     @property
     def waiting(self) -> int:
         return len(self._pending)
 
-    async def ask(self, req: ApprovalRequest) -> Answer:
-        pid = f"ap-{uuid.uuid4().hex[:12]}"
+    async def _wait(self, prefix: str, timeout: float, **fields: Any) -> tuple[Any, str]:
+        """Send a pending_input and wait for its answer: (value, via). Timeout/interrupt → (None, reason)."""
+        pid = f"{prefix}-{uuid.uuid4().hex[:12]}"
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[pid] = fut
-        card = self.render(req)
-        await self.send("pending_input", id=pid, session_id=self._session(), kind="approval", card=card,
-                        voice_ok=req.policy is Policy.ASK, tool=req.tool_name, timeout_s=self.timeout)
+        await self.send("pending_input", id=pid, session_id=self._session(), timeout_s=timeout, **fields)
         try:
-            value, via = await asyncio.wait_for(fut, self.timeout)
+            value, via = await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
-            value, via = "deny", "timeout"
+            value, via = None, "timeout"
         except asyncio.CancelledError:
-            value, via = "deny", "interrupt"
+            value, via = None, "interrupt"
         finally:
             self._pending.pop(pid, None)
         if via in ("timeout", "interrupt"):
             await self.send("dismiss_panel", id=pid, reason=via)
+        return value, via
+
+    async def ask(self, req: ApprovalRequest) -> Answer:
+        value, via = await self._wait("ap", self.timeout, kind="approval", card=self.render(req),
+                                      voice_ok=req.policy is Policy.ASK, tool=req.tool_name)
         return Answer(value == "approve", via)
 
+    async def question(self, tool_input: dict) -> dict | None:
+        """Claude's AskUserQuestion (#19): show the questions, wait, and return `updated_input` for
+        PermissionResultAllow ({questions, answers: {question text: label or typed text}}), or None."""
+        questions = [q for q in (tool_input or {}).get("questions", []) if isinstance(q, dict) and q.get("question")]
+        if not questions:
+            return None
+        value, via = await self._wait("q", self.question_timeout, kind="question", questions=questions, voice_ok=True)
+        if not isinstance(value, dict):
+            return None
+        answers = {}
+        for q in questions:
+            a = value.get(q["question"])
+            if isinstance(a, list):
+                a = ", ".join(str(x) for x in a if str(x).strip())
+            if isinstance(a, str) and a.strip():
+                answers[q["question"]] = a.strip()
+        if not answers:
+            return None
+        return {**tool_input, "questions": tool_input.get("questions", []), "answers": answers}
+
     def answer(self, msg: dict[str, Any]) -> bool:
-        """Apply an `answer {pending_id, value: approve|deny, via}` from the app. False if it matched nothing."""
-        fut = self._pending.get(msg.get("pending_id"))
+        """Apply an `answer {pending_id, value, via}` from the app. For approvals `value` is approve|deny (anything
+        else denies); for questions it's {question text: label(s) or typed text}. False if it matched nothing."""
+        pid = msg.get("pending_id")
+        fut = self._pending.get(pid)
         if fut is None or fut.done():
             return False
         value = msg.get("value")
         via = msg.get("via") if msg.get("via") in VALID_VIA else "click"
-        fut.set_result(("approve" if value == "approve" else "deny", via))
+        if str(pid).startswith("ap-"):
+            value = "approve" if value == "approve" else "deny"
+        fut.set_result((value, via))
         return True
 
     def cancel_all(self, via: str = "interrupt") -> int:
         n = 0
         for fut in list(self._pending.values()):
             if not fut.done():
-                fut.set_result(("deny", via))
+                fut.set_result((None, via))
                 n += 1
         return n

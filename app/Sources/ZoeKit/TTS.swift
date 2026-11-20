@@ -29,7 +29,8 @@ public final class Speaker {
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     private var format: AVAudioFormat?
-    private var queue: [(text: String, onPlayed: (() -> Void)?)] = []
+    public typealias Played = @MainActor @Sendable () -> Void
+    private var queue: [(text: String, onPlayed: Played?)] = []
     private var synthesizing = false
     private var pendingBuffers = 0
     private var replyOpen = false          // more sentences may come
@@ -78,7 +79,7 @@ public final class Speaker {
 
     /// Queues a sentence of the current reply. `onPlayed` runs once this sentence has been heard to the end
     /// (not just synthesised): approvals listen for a "yes" only after their prompt finished (#17).
-    public func enqueue(_ text: String, onPlayed: (() -> Void)? = nil) {
+    public func enqueue(_ text: String, onPlayed: Played? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { onPlayed?(); return }
         beginReplyIfNeeded()
@@ -155,7 +156,7 @@ public final class Speaker {
 
     /// A one-frame silent buffer behind the sentence's own: buffers play in order, so its completion means the
     /// sentence has been heard. If nothing was scheduled (no engine), runs `then` at once.
-    private func scheduleMarker(gen: Int, then: @escaping () -> Void) {
+    private func scheduleMarker(gen: Int, then: @escaping Played) {
         guard let f = format, let p = player, let b = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: 1) else { then(); return }
         b.frameLength = 1          // zero-filled
         pendingBuffers += 1

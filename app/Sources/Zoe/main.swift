@@ -253,6 +253,8 @@ if args.contains("--ui-demo") {
             bubble.removeApproval("demo-1"); ch.waiting = 1
             await phase("approval2", 3)
             bubble.removeApproval("demo-2"); ch.waiting = 0
+            bubble.hide(); bubble.openTyping(); ch.quiet = true
+            await phase("typing", 2)
             let panels = PanelWindow(anchor: ch.panel)
             if let t = PanelContent(message: ["id": "panel-t", "kind": "table", "payload": [
                 "title": "Calendar: next 7 days", "columns": ["When", "What", "Where"],
@@ -345,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
+    private let typeHotkey = Hotkey(kind: .typeShortcut)
     private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
     private let quietItem = NSMenuItem(title: "Quiet Mode", action: #selector(toggleQuiet), keyEquivalent: "")
     private static let quietKey = "quietMode"
@@ -370,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(takeBackItem)
         menu.autoenablesItems = false
         takeBackItem.isEnabled = false
-        menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
+        menu.addItem(NSMenuItem(title: "Type to Zoe…  ⌃⌥T", action: #selector(typeToZoe), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Zoe", action: #selector(quit), keyEquivalent: "q"))
@@ -412,6 +415,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
         panels.onChoice = { [weak self] choice in self?.sendTyped(choice, trigger: "click") }
+        bubble.onTyped = { [weak self] text in self?.sendTyped(text, trigger: "text") }
+        typeHotkey.onSignal = { sig in
+            if sig == .down { Task { @MainActor [weak self] in self?.typeToZoe() } }
+        }
+        if !typeHotkey.start() { print("⌃⌥T unavailable (taken by another app?)") }
         bubble.onRunInTerminal = { [weak self] card in
             guard let self, let t = card.terminal else { return }
             self.link.answer(pendingID: card.id, value: "deny", via: "terminal")   // Zoe doesn't run it
@@ -643,19 +651,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func sendTest() {
-        let alert = NSAlert()
-        alert.messageText = "Send a test message to the core"
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        field.stringValue = "Hello Zoe"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Send"); alert.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        counter += 1
-        current = "u\(counter)"
-        bubble.showYou(field.stringValue)
-        link.send(CoreMessage("utterance", ["id": current!, "text": field.stringValue, "trigger": "text"]))
+    /// Type to Zoe (#37): a text box in the bubble; Return sends it like a spoken request.
+    @objc private func typeToZoe() {
+        if !character.isVisible { character.show() }
+        bubble.openTyping()
     }
 
     @objc private func restartCore() { link.stop(); startLink() }

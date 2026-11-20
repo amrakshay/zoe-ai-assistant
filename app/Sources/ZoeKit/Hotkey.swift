@@ -6,7 +6,10 @@ import Carbon.HIToolbox
 /// Accessibility). Alternative: **⌃⌥Space** via `RegisterEventHotKey`. Both report press and release.
 /// If another key is pressed while right ⌥ is held (⌥ used as a modifier), the press is cancelled.
 public final class Hotkey: @unchecked Sendable {
-    public enum Kind: String, Sendable { case rightOption = "right-option", controlOptionSpace = "ctrl-opt-space" }
+    public enum Kind: String, Sendable {
+        case rightOption = "right-option", controlOptionSpace = "ctrl-opt-space"
+        case typeShortcut = "ctrl-opt-t"        // ⌃⌥T: open "Type to Zoe" (#37)
+    }
     public enum Signal: Sendable { case down, up, cancelled }
 
     public let kind: Kind
@@ -32,7 +35,8 @@ public final class Hotkey: @unchecked Sendable {
     public func start() -> Bool {
         switch kind {
         case .rightOption: return startTap()
-        case .controlOptionSpace: return startHotKey()
+        case .controlOptionSpace: return startHotKey(key: UInt32(kVK_Space), id: 1)
+        case .typeShortcut: return startHotKey(key: UInt32(kVK_ANSI_T), id: 2)
         }
     }
 
@@ -79,17 +83,25 @@ public final class Hotkey: @unchecked Sendable {
         }
     }
 
-    private func startHotKey() -> Bool {
+    fileprivate var hotKeyID: UInt32 = 0
+
+    private func startHotKey(key: UInt32, id: UInt32) -> Bool {
+        hotKeyID = id
         var spec = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
                     EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
         let me = Unmanaged.passUnretained(self).toOpaque()
         let st = InstallEventHandler(GetApplicationEventTarget(), { _, ev, ctx in
             let hk = Unmanaged<Hotkey>.fromOpaque(ctx!).takeUnretainedValue()
+            // Every handler sees every hotkey event: only react to our own id, and let others through.
+            var hid = EventHotKeyID()
+            GetEventParameter(ev, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                              MemoryLayout<EventHotKeyID>.size, nil, &hid)
+            guard hid.id == hk.hotKeyID else { return OSStatus(eventNotHandledErr) }
             hk.onSignal?(GetEventKind(ev) == UInt32(kEventHotKeyPressed) ? .down : .up)
             return noErr
         }, 2, &spec, me, &handlerRef)
-        let r = RegisterEventHotKey(UInt32(kVK_Space), UInt32(controlKey | optionKey),
-                                    EventHotKeyID(signature: OSType(0x5A4F4521), id: 1), GetApplicationEventTarget(), 0, &hotKeyRef)
+        let r = RegisterEventHotKey(key, UInt32(controlKey | optionKey),
+                                    EventHotKeyID(signature: OSType(0x5A4F4521), id: id), GetApplicationEventTarget(), 0, &hotKeyRef)
         return st == noErr && r == noErr
     }
 }

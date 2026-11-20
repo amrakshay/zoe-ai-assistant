@@ -346,6 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
     private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
+    private let quietItem = NSMenuItem(title: "Quiet Mode", action: #selector(toggleQuiet), keyEquivalent: "")
+    private static let quietKey = "quietMode"
     private var coreOffline = false
     private var voiceState: TurnMachine.UIState = .idle
 
@@ -360,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(characterItem)
+        menu.addItem(quietItem)
         menu.addItem(recentItem)
         recentItem.submenu = NSMenu()
         recentItem.isEnabled = false
@@ -450,6 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.turnSent()
         }
         voice.onListeningStarted = { [weak self] in self?.link.send(CoreMessage("listening")) }
+        setQuiet(UserDefaults.standard.bool(forKey: Self.quietKey))
         voice.onInterrupt = { [weak self] in
             guard let self, let id = self.current else { return }
             self.dropped = id            // ignore the rest of the interrupted reply
@@ -480,6 +484,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("couldn't open Terminal: \(error)")
         }
     }
+
+    /// Quiet mode (#36): no speech at all, everything on screen; remembered across restarts.
+    private func setQuiet(_ on: Bool) {
+        voice.quiet = on
+        character.quiet = on
+        quietItem.state = on ? .on : .off
+        UserDefaults.standard.set(on, forKey: Self.quietKey)
+        link.send(CoreMessage("mute", ["on": on]))
+    }
+
+    @objc private func toggleQuiet() { setQuiet(!voice.quiet) }
 
     /// A request that wasn't spoken (a typed line, a clicked choice): shown, then sent like an utterance.
     func sendTyped(_ text: String, trigger: String) {
@@ -589,6 +604,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "mode":
+            setQuiet(m.string("value") == "quiet")
         case "sessions_activity":
             updateRecent(m["list"] as? [[String: Any]] ?? [])
         case "session_state":

@@ -1,4 +1,4 @@
-from zoe_core.speech import ALL_ON_SCREEN, ON_SCREEN, READ_ALL, SentenceSplitter, SpokenReply, speakable
+from zoe_core.speech import ALL_ON_SCREEN, ON_SCREEN, QUIET_OFF, QUIET_ON, READ_ALL, SentenceSplitter, SpokenReply, speakable
 
 
 def test_streams_sentences_as_they_end():
@@ -78,3 +78,11 @@ def test_read_all_phrases():
     for p in ["Read it all", "read it all.", "Read me the whole thing", "read everything"]:
         assert READ_ALL.match(p), p
     assert not READ_ALL.match("read my email")
+
+
+def test_quiet_mode_phrases():
+    for p in ["Quiet mode", "quiet mode.", "Zoe, go quiet", "stop talking"]:
+        assert QUIET_ON.match(p), p
+    for p in ["Talk to me again", "voice mode", "unmute"]:
+        assert QUIET_OFF.match(p), p
+    assert not QUIET_ON.match("put my phone in quiet mode please")

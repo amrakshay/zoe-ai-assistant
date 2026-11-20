@@ -27,7 +27,7 @@ from .ui import UI
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
 from .router import SessionInfo, route
-from .speech import READ_ALL, SentenceSplitter, SpokenReply
+from .speech import QUIET_OFF, QUIET_ON, READ_ALL, SentenceSplitter, SpokenReply
 
 MAX_LIVE = 2      # Claude Code processes kept connected (each is ~250–600 MB)
 
@@ -456,6 +456,14 @@ class Brain:
 
         if READ_ALL.match(text.strip()) and self.last_reply:
             await self._read_all(uid)
+            return
+        if QUIET_ON.match(text.strip()) or QUIET_OFF.match(text.strip()):     # quiet mode by voice (#36)
+            quiet = bool(QUIET_ON.match(text.strip()))
+            await self.send("mode", value="quiet" if quiet else "voice")
+            await self.send("say", utterance_id=uid, text="" if quiet else "Okay, I'll talk again.", final=True)
+            await self.send("bubble", utterance_id=uid, text="Quiet mode on: I'll show everything and say nothing."
+                            if quiet else "Voice mode on.", summarised=False)
+            await self.send("state", value="idle")
             return
         await self.choose(text)
         self.gate.taint.user_said(text)          # the chosen session's gate (#18, #26)

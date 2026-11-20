@@ -71,6 +71,7 @@ def resume_command(session_id: str) -> str:
 class Brain:
     def __init__(self, send: Send, index=None) -> None:
         self.index = index        # the session index (#24); None in tests
+        self.projects = None      # repos and aliases (#25), loaded in the background at start
         self.send = send
         self.client = None
         self.session_id: str | None = None
@@ -151,6 +152,18 @@ class Brain:
             resume=self.session_id,
             fork_session=bool(self.fork_next and self.session_id),
         )
+
+    async def load_projects(self) -> None:
+        """Seed projects from Claude Code's session folders (file reads in a thread; index writes here)."""
+        from .projects import load
+        try:
+            ps = await asyncio.to_thread(load)
+            if self.index is not None:
+                ps.save(self.index)
+            self.projects = ps
+            log(f"projects: {len(ps.items)} in {ps.seed_ms:.0f} ms")
+        except Exception as e:  # noqa: BLE001 — routing falls back to the home folder
+            log("projects unavailable:", repr(e))
 
     def warm_up(self) -> None:
         if self._connecting is None:

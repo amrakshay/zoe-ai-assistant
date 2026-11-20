@@ -35,6 +35,8 @@ class Core:
             await self.send("state", value="idle")
             if self.brain:
                 self.brain.warm_up()
+                if hasattr(self.brain, "load_projects"):
+                    asyncio.create_task(self.brain.load_projects())
         elif t == "ping":
             await self.send("pong", id=msg.get("id"), uptime_s=round(time.monotonic() - self.started, 3))
         elif t == "utterance":

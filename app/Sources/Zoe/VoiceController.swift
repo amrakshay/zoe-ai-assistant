@@ -188,7 +188,9 @@ final class VoiceController {
     func questionAsked(id: String, question: String, labels: [String], multi: Bool, voiceOK: Bool) {
         guard !approvalQueue.contains(where: { $0.id == id }) else { return }
         let opts = labels.count > 1 ? labels.dropLast().joined(separator: ", ") + ", or " + labels.last! : labels.first ?? ""
-        let prompt = voiceOK ? "\(question) \(opts)?" : "Zoe has a few questions for you on screen."
+        // "Do you prefer teal or orange?" already names its options: don't read them twice.
+        let named = labels.allSatisfy { question.localizedCaseInsensitiveContains($0) }
+        let prompt = !voiceOK ? "Zoe has a few questions for you on screen." : named ? question : "\(question) \(opts)?"
         approvalQueue.append(VoiceApproval(id: id, summary: prompt, voiceOK: voiceOK, question: (question, labels, multi)))
         if approvalQueue.count == 1 { promptNext() }
     }

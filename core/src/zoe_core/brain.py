@@ -16,6 +16,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from .approvals import Approvals
+from .names import Names
 from .renderers import render
 from .terminal import TerminalHandoff
 from .gate import Gate
@@ -33,6 +34,8 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
 - To change, send, create or run something, just call the tool: Zoe shows the user an approval card and
   waits for their answer, so don't ask for permission in words first. If it's declined or not answered,
   say so in one short sentence and don't retry.
+- Before sending to a Slack user or channel by ID, look it up first (slack_read_user_profile with its user_id,
+  or slack_search_channels), so the approval card can show its name.
 """.strip()
 
 Send = Callable[..., Awaitable[None]]
@@ -70,9 +73,10 @@ class Brain:
         self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
-        self.approvals = Approvals(send, render=render, session_id=lambda: self.session_id)
+        self.names = Names()
+        self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id)
         self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
-        self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id)
+        self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
         # Handoff (#20): once the session is opened in Terminal, Zoe never writes to it again; the next turn
         # forks it (the terminal keeps the original). PLAN.md §5.10.
         self.handed_off: str | None = None

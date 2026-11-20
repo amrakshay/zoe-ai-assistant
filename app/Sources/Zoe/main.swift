@@ -95,7 +95,11 @@ if let i = args.firstIndex(of: "--smoke") {
             }
             let value = ProcessInfo.processInfo.environment["ZOE_SMOKE_ANSWER"] == "approve" ? "approve" : "deny"
             let card = m["card"] as? [String: Any]
-            print("approval asked: \(card?["title"] as? String ?? "?") → \(value)")
+            let fields = (card?["fields"] as? [[String: Any]] ?? []).compactMap { f -> String? in
+                guard let l = f["label"] as? String, ["To", "Site", "Command"].contains(l) else { return nil }
+                return "\(l): \(f["value"] as? String ?? "")"
+            }
+            print("approval asked: \(card?["title"] as? String ?? "?") [\(fields.joined(separator: "; "))] → \(value)")
             link.answer(pendingID: id, value: value, via: "click")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break

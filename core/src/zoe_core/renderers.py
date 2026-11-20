@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .gate import ApprovalRequest
+from .names import Names
 
 MAX_CHARS = 600
 MAX_LINES = 12
@@ -86,7 +87,7 @@ def _bash(req: ApprovalRequest) -> dict:
     if req.tool_input.get("run_in_background"):
         fields.append(field("Runs", "in the background"))
     return {"title": "Run a command?", "fields": fields,
-            "summary": "Zoe wants to run a command. It's on screen; this one needs a click.", "why": req.reason}
+            "summary": "Zoe wants to run a command. It's on screen.", "why": req.reason}
 
 
 def _edit(req: ApprovalRequest) -> dict:
@@ -120,7 +121,7 @@ def _fetch(req: ApprovalRequest) -> dict:
             "summary": f"Zoe wants to open a page on {domain}.", "why": req.reason}
 
 
-def _message(req: ApprovalRequest) -> dict | None:
+def _message(req: ApprovalRequest, names: Names | None = None) -> dict | None:
     """Sends, posts, replies, emails, drafts: the recipient and the exact text."""
     service, action = service_of(req.tool_name)
     i = req.tool_input
@@ -132,7 +133,8 @@ def _message(req: ApprovalRequest) -> dict | None:
     verb = "Draft" if "draft" in action.lower() else "Send"
     fields = []
     if to:
-        fields.append(field("To", to[1]))
+        named = names.label(to[1]) if names else None
+        fields.append(field("To", named or to[1]))
     if subject:
         fields.append(field("Subject", subject[1]))
     if text:
@@ -140,10 +142,12 @@ def _message(req: ApprovalRequest) -> dict | None:
     rest = {k: v for k, v in i.items() if k not in {to and to[0], text and text[0], subject and subject[0]}}
     if rest:
         fields.append(field("Other details", json.dumps(rest, ensure_ascii=False, default=str), mono=True))
-    who = f" to {words(to[1], 4)}" if to else ""
+    known = names.by_id.get(to[1]) if (names and to and isinstance(to[1], str)) else None
+    who = f" to {words(known or to[1], 4)}" if to else ""
     say = f": {words(text[1])}" if text else ""
+    why = f"{'Drafts' if verb == 'Draft' else 'Sends'} {noun} as you." + ("" if req.reason.startswith("not on the allowlist") else f" ({req.reason})")
     return {"title": f"{verb} {noun}{' in ' + service if service else ''}?", "fields": fields,
-            "summary": f"{verb} {noun}{who}{say}?", "why": req.reason}
+            "summary": f"{verb} {noun}{who}{say}?", "why": why}
 
 
 def _event(req: ApprovalRequest) -> dict | None:
@@ -159,7 +163,7 @@ def _event(req: ApprovalRequest) -> dict | None:
             "summary": f"{verb} the calendar event{' ' + words(what[1], 8) if what else ''}?", "why": req.reason}
 
 
-def render(req: ApprovalRequest) -> dict:
+def render(req: ApprovalRequest, names: Names | None = None) -> dict:
     """The card for one approval request. Never raises: on any problem, the raw card."""
     try:
         if req.tool_name == "Bash":
@@ -171,7 +175,7 @@ def render(req: ApprovalRequest) -> dict:
         elif req.tool_name in ("WebFetch", "WebSearch"):
             card = _fetch(req)
         elif req.tool_name.startswith("mcp__"):
-            card = _event(req) or _message(req) or raw_card(req)
+            card = _event(req) or _message(req, names) or raw_card(req)
         else:
             card = raw_card(req)
     except Exception:  # noqa: BLE001 — a renderer bug must not hide the input

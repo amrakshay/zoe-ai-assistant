@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 Send = Callable[..., Awaitable[None]]
 
 NEEDS_TERMINAL = re.compile(
-    r"a terminal is required|no tty present|askpass|password for |^password:|enter passphrase|"
+    r"a terminal is required|no tty present|askpass|password for |^password:|a password is required|enter passphrase|"
     r"permission denied \(publickey|host key verification failed|stdin is not a terminal|"
     r"inappropriate ioctl for device|not a tty|must be run from a terminal|interactive login|"
     r"could not read (username|password)",
@@ -64,9 +64,10 @@ def service_of(tool: str) -> str:
 
 
 class TerminalHandoff:
-    def __init__(self, send: Send, session_id: Callable[[], str | None] | None = None):
+    def __init__(self, send: Send, session_id: Callable[[], str | None] | None = None, names=None):
         self.send = send
         self._session = session_id or (lambda: None)
+        self.names = names            # learns names for IDs from connector results (approval cards)
 
     async def _card(self, title: str, command: str, cwd: str, note: str) -> None:
         await self.send("pending_input", id=f"term-{uuid.uuid4().hex[:12]}", session_id=self._session(), kind="terminal",
@@ -78,6 +79,8 @@ class TerminalHandoff:
         failed = event == "PostToolUseFailure"
         resp = {"is_error": True, "error": input_data.get("error", "")} if failed else input_data.get("tool_response")
         text = response_text(resp)
+        if self.names is not None and not failed:
+            self.names.learn(tool, input_data.get("tool_input") or {}, input_data.get("tool_response"))
         cwd = str(input_data.get("cwd") or "")
         if tool == "Bash" and NEEDS_TERMINAL.search(text):
             cmd = str((input_data.get("tool_input") or {}).get("command", ""))

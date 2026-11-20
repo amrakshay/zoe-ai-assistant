@@ -58,6 +58,18 @@ CONNECTOR_READ = frozenset({
     "mcp__claude_ai_Google_Calendar__get_event",
     "mcp__claude_ai_Google_Calendar__search_events",
     "mcp__claude_ai_Google_Calendar__suggest_time",
+    # Slack reads (names seen in a live session, 2026-11-20). Sends, posts and schedules stay ask.
+    "mcp__claude_ai_Slack__slack_read_user_profile",
+    "mcp__claude_ai_Slack__slack_search_users",
+    "mcp__claude_ai_Slack__slack_search_channels",
+    "mcp__claude_ai_Slack__slack_read_channel",
+    "mcp__claude_ai_Slack__slack_read_thread",
+    "mcp__claude_ai_Slack__slack_search_public",
+    "mcp__claude_ai_Slack__slack_search_public_and_private",
+    "mcp__claude_ai_Slack__slack_list_channel_members",
+    "mcp__claude_ai_Slack__slack_list_user_channels",
+    "mcp__claude_ai_Slack__slack_get_reactions",
+    "mcp__claude_ai_Slack__slack_read_canvas",
 })
 
 # Explicit CLICK entries beyond the delete-like names (PLAN.md §7.7: Bash, deletes, jobs, screenshots).

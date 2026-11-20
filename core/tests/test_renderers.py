@@ -82,3 +82,35 @@ def test_long_values_are_cut_visibly():
     out = clip(long)
     assert out.endswith("(28 more lines)") and len(out.splitlines()) == MAX_LINES + 1
     assert clip("x" * 2000).endswith("(1400 more characters)")
+
+
+def test_bash_summary_doesnt_repeat_the_click_note():
+    assert "click" not in card("Bash", {"command": "ls"}, Policy.CLICK)["summary"].lower()
+
+
+def test_send_cards_say_what_they_do():
+    c = card("mcp__claude_ai_Slack__slack_send_message", {"channel_id": "C123", "message": "hi"})
+    assert c["why"].startswith("Sends a message as you.")
+
+
+def test_slack_ids_get_names_learned_from_slack_only():
+    from zoe_core.names import Names
+    from zoe_core.renderers import render
+    from zoe_core.gate import ApprovalRequest
+    n = Names()
+    req = ApprovalRequest("mcp__claude_ai_Slack__slack_send_message", {"channel_id": "URRN4FWQ2", "message": "hi"}, Policy.ASK, "x", "t")
+    assert values(render(req, n))["To"] == "URRN4FWQ2 (Slack user ID; name not looked up)"
+    n.learn("mcp__claude_ai_Slack__slack_read_user_profile", {"user_id": "URRN4FWQ2"},
+            [{"type": "text", "text": '{"result":"akshay.r (Akshay R)\\nSome Co\\n"}'}])
+    c = render(req, n)
+    assert values(c)["To"] == "akshay.r (Akshay R) (URRN4FWQ2)" and "akshay.r" in c["summary"]
+
+
+def test_names_from_listings_and_never_from_non_connectors():
+    from zoe_core.names import Names
+    n = Names()
+    n.learn("mcp__claude_ai_Slack__slack_search_users", {}, "Results:\nPriya S (U01ABCDEFGH)\nC0123456789: #general")
+    assert n.by_id["U01ABCDEFGH"] == "Priya S" and n.by_id["C0123456789"] == "#general"
+    n.learn("Bash", {}, "Mallory (U99999999XX)")
+    assert "U99999999XX" not in n.by_id
+    assert n.label("hello") is None

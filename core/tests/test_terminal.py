@@ -68,3 +68,8 @@ def test_failed_commands_arrive_as_post_tool_use_failure():
          "error": "Exit code 1\nsudo: a terminal is required to read the password", "cwd": "/repo"}, "t", None))
     assert w.sent and w.sent[0][1]["kind"] == "terminal"
     assert out["hookSpecificOutput"]["hookEventName"] == "PostToolUseFailure"
+
+
+def test_sudo_dash_n_with_echo_succeeds_but_still_needs_a_terminal():
+    out, sent = run("Bash", {"command": 'sudo -n true; echo "exit code: $?"'}, {"stdout": "sudo: a password is required\nexit code: 1", "stderr": ""})
+    assert sent and sent[0][1]["kind"] == "terminal"

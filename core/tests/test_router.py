@@ -109,3 +109,17 @@ def test_a_new_route_reuses_the_unused_session_started_at_launch():
     warm = b.active                                  # pre-connected at hello, never used
     asyncio.run(b.choose("what's the capital of Portugal?"))
     assert b.active is warm and len(b.sessions) == 1
+
+
+def test_idle_sessions_close_and_busy_ones_dont(monkeypatch):
+    monkeypatch.setenv("ZOE_IDLE_CLOSE_S", "600")
+    b = Brain(Wire())
+    b.projects = projects("a-one")
+    old = b.active
+    old.client, old.last_used, old.session_id = FakeClient(), 1000, "s-old"
+    asyncio.run(b.choose("in the one repo, hi"))
+    new = b.active
+    new.client, new.last_used = FakeClient(), 1500
+    closed = asyncio.run(b.sweep_idle(now=1000 + 601))
+    assert closed == 1 and old.client is None and new.client is not None and old.session_id == "s-old"
+    assert b.options(old).resume == "s-old" and b.options(old).cwd == old.cwd   # resumes by id, in its folder

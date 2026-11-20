@@ -12,7 +12,7 @@ from typing import Any
 # ignored until their features land, so the app can be ahead of the core without breaking the link.
 APP_TO_CORE = {
     "hello", "ping", "utterance", "user_interrupted", "dropped", "context_snapshot", "answer",
-    "open_session", "take_back", "cancel", "chat_message", "presence", "mute", "shutdown",
+    "open_session", "take_back", "cancel", "chat_message", "presence", "mute", "shutdown", "listening",
 }
 
 MAX_LINE = 1 << 20  # 1 MiB: anything longer is rejected rather than buffered without bound

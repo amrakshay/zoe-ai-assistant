@@ -30,6 +30,14 @@ from .speech import READ_ALL, SentenceSplitter, SpokenReply
 
 MAX_LIVE = 2      # Claude Code processes kept connected (each is ~250–600 MB)
 
+
+def idle_close_s() -> float:
+    """Close a session's Claude Code process after this long without a turn (#29). Default 10 min."""
+    try:
+        return float(os.environ.get("ZOE_IDLE_CLOSE_S", "600"))
+    except ValueError:
+        return 600.0
+
 PERSONA = """
 You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, then shown in a small bubble.
 - Start with a short spoken answer: one to three plain sentences (under 50 words), no markdown, no lists,
@@ -114,6 +122,8 @@ class Brain:
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
         self.sessions: list[Session] = []
         self.active = self.new_session(home())
+        self._sweeper: asyncio.Task | None = None
+        self.started_at = time.time()
 
     def new_session(self, cwd: str, session_id: str | None = None) -> Session:
         s = Session(cwd, Gate(approver=self.approvals.ask, session_id=lambda: self.session_id), session_id)
@@ -217,6 +227,39 @@ class Brain:
                 self.index.set_summary(session_id, res["summary"])
         log(f"summary for {session_id[:8]} in {dt:.1f} s: {'ok' if res else 'failed'}")
 
+    def start_sweeper(self) -> None:
+        if self._sweeper is None:
+            self._sweeper = asyncio.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        while True:
+            await asyncio.sleep(max(5.0, min(60.0, idle_close_s() / 2)))
+            await self.sweep_idle()
+
+    async def sweep_idle(self, now: float | None = None) -> int:
+        """Close Claude Code processes idle longer than `idle_close_s()` (#29). They resume by id, in their stored
+        folder, on the next turn. A session mid-turn or waiting for my answer is never closed."""
+        now = now or time.time()
+        busy = self._turn is not None and not self._turn.done()
+        closed = 0
+        for s in self.sessions:
+            if s.client is None or (busy and s is self.active):
+                continue
+            last = s.last_used or self.started_at
+            if now - last < idle_close_s():
+                continue
+            self.summarise_soon(s)
+            try:
+                await s.client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            s.client, s._connecting = None, None
+            if self.index is not None and s.session_id:
+                self.index.set_status(s.session_id, "idle")
+            closed += 1
+            log(f"closed {str(s.session_id)[:8]} after {int((now - last) / 60)} idle min ({s.cwd})")
+        return closed
+
     async def close_extra(self) -> None:
         """Keep at most MAX_LIVE Claude Code processes; the rest close and resume by id later."""
         live = sorted((s for s in self.sessions if s.client is not None and s is not self.active),
@@ -308,6 +351,7 @@ class Brain:
             log("projects unavailable:", repr(e))
 
     def warm_up(self) -> None:
+        self.start_sweeper()
         s = self.active
         if s._connecting is None:
             s._connecting = asyncio.create_task(self._connect(s))

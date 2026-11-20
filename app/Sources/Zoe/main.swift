@@ -409,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.link.send(CoreMessage("utterance", ["id": self.current!, "text": text, "trigger": "ptt"]))
             self.voice.turnSent()
         }
+        voice.onListeningStarted = { [weak self] in self?.link.send(CoreMessage("listening")) }
         voice.onInterrupt = { [weak self] in
             guard let self, let id = self.current else { return }
             self.dropped = id            // ignore the rest of the interrupted reply

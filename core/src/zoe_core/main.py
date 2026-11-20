@@ -49,6 +49,10 @@ class Core:
         elif t == "answer":
             if not (self.brain and self.brain.approvals.answer(msg)):
                 await self.send("error", message=f"answer for unknown or finished request: {msg.get('pending_id')}")
+        elif t == "listening":
+            # I started talking (#29): reconnect the active session now, while I speak, if it was closed.
+            if self.brain:
+                self.brain.warm_up()
         elif t == "user_interrupted":
             if self.brain:
                 await self.brain.interrupt()

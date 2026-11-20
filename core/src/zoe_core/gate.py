@@ -1,60 +1,89 @@
-"""Interim approval gate for phase 1 (#2): read-only.
+"""The approval gate (PLAN.md §7; issues #14, #15).
 
-Every tool call goes through one catch-all PreToolUse hook (registered with on_failure="block", so a
-hook error can never let a tool run). The decision is by **exact tool name**: an allowlist of read-only
-tools runs; everything else is denied with a reason Claude can say out loud. The full gate with voice
-and click approvals, taint and core-rendered cards is phase 2 (PLAN.md §7).
+Every tool call goes through one catch-all `PreToolUse` hook, registered with `on_failure="block"` so a hook
+error can never let a tool run. The hook runs before any allow rule in my settings, so those can't approve a
+tool behind Zoe's back (F02).
+
+The decision comes from the policy table (`policy.py`):
+- ALLOW → allow. DENY → deny with a reason Claude can say out loud.
+- ASK / CLICK → the hook asks me itself through the `approver` (the app's approval card, #15) and waits.
+  With no approver, or if asking fails, the answer is deny.
+
+Every decision is logged without the raw input (`actions.py`).
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
-# Built-in tools that only read local files.
-BUILTIN_READ = frozenset({"Read", "Grep", "Glob"})
-
-# Connector tools that only read. Exact names, as reported by the session's init message.
-CONNECTOR_READ = frozenset({
-    "mcp__claude_ai_Google_Calendar__list_calendars",
-    "mcp__claude_ai_Google_Calendar__list_events",
-    "mcp__claude_ai_Google_Calendar__get_event",
-    "mcp__claude_ai_Google_Calendar__search_events",
-    "mcp__claude_ai_Google_Calendar__suggest_time",
-})
-
-DENY_REASON = (
-    "Zoe can't use this tool yet: in this version only reading is allowed, and anything that changes, "
-    "sends or runs something is blocked until approvals arrive. Tell the user briefly that you can't do "
-    "that yet, and offer what you can do by reading instead."
-)
+from . import actions
+from .policy import BUILTIN_READ, CONNECTOR_READ, Decision, Policy, decide  # noqa: F401 (re-exported)
 
 
 @dataclass(frozen=True)
-class Decision:
-    allow: bool
+class ApprovalRequest:
+    tool_name: str
+    tool_input: dict
+    policy: Policy          # ASK or CLICK
     reason: str
+    tool_use_id: str | None
 
 
-def extra_allowed() -> frozenset[str]:
-    """Extra exact tool names from ZOE_ALLOW_TOOLS (comma-separated), for trying other read-only tools."""
-    raw = os.environ.get("ZOE_ALLOW_TOOLS", "")
-    return frozenset(t.strip() for t in raw.split(",") if t.strip())
+@dataclass(frozen=True)
+class Answer:
+    approved: bool
+    via: str                # click | voice | timeout | restart | interrupt | error
 
 
-def decide(tool_name: str, allowed: frozenset[str] | None = None) -> Decision:
-    allowed = (BUILTIN_READ | CONNECTOR_READ | extra_allowed()) if allowed is None else allowed
-    if isinstance(tool_name, str) and tool_name in allowed:
-        return Decision(True, "read-only tool on the allowlist")
-    return Decision(False, DENY_REASON)
+Approver = Callable[[ApprovalRequest], Awaitable[Answer]]
+
+NO_APPROVALS = (
+    "This needs the user's approval, and approvals aren't available right now, so it was not done. Tell the "
+    "user briefly that you couldn't do it, and offer what you can do by reading instead."
+)
+DECLINED = "The user declined this. Don't retry it; say briefly that you didn't do it."
+NOT_ANSWERED = "The user didn't approve this in time, so it was not done. Don't retry it unless they ask again."
+
+
+def _out(decision: str, reason: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
+                                   "permissionDecisionReason": reason}}
+
+
+class Gate:
+    def __init__(self, approver: Approver | None = None, session_id: Callable[[], str | None] | None = None):
+        self.approver = approver
+        self._session = session_id or (lambda: None)
+
+    async def pre_tool_use(self, input_data: dict, tool_use_id: str | None, context) -> dict:
+        name = input_data.get("tool_name")
+        tool_input = input_data.get("tool_input") or {}
+        d: Decision = decide(name, tool_input)
+        sid = self._session()
+        if d.policy is Policy.ALLOW:
+            actions.log_decision(str(name), tool_input, "allow", "policy", d.reason, sid)
+            return _out("allow", d.reason)
+        if d.policy is Policy.DENY:
+            actions.log_decision(str(name), tool_input, "deny", "policy", d.reason, sid)
+            return _out("deny", f"Blocked: {d.reason}.")
+        if self.approver is None:
+            actions.log_decision(str(name), tool_input, "deny", "no-approver", d.reason, sid)
+            return _out("deny", NO_APPROVALS)
+        try:
+            ans = await self.approver(ApprovalRequest(name, tool_input, d.policy, d.reason, tool_use_id))
+        except Exception:  # noqa: BLE001 — any failure while asking is a deny
+            ans = Answer(False, "error")
+        if d.policy is Policy.CLICK and ans.approved and ans.via != "click":
+            ans = Answer(False, ans.via)          # a click-only tool approved any other way is still a deny
+        actions.log_decision(str(name), tool_input, "allow" if ans.approved else "deny", ans.via, d.reason, sid)
+        if ans.approved:
+            return _out("allow", f"approved by the user ({ans.via})")
+        return _out("deny", DECLINED if ans.via in ("click", "voice") else NOT_ANSWERED)
+
+
+# Phase 1 entry point, kept for tests and callers that don't need approvals: no approver, so ASK/CLICK deny.
+_default = Gate()
 
 
 async def pre_tool_use(input_data: dict, tool_use_id: str | None, context) -> dict:
-    """PreToolUse hook body: allow or deny by exact name. Never returns "ask" in phase 1."""
-    d = decide(input_data.get("tool_name"))
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow" if d.allow else "deny",
-            "permissionDecisionReason": d.reason,
-        }
-    }
+    return await _default.pre_tool_use(input_data, tool_use_id, context)

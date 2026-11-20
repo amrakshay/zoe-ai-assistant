@@ -5,7 +5,7 @@
 - Loads my user, project and local settings, so plugins, connectors and CLAUDE.md context are there.
   The session connects at core start, so the slow first connect (my SessionStart hook, ~11 s in F01)
   happens at launch, not on the first question. Follow-up turns reuse the same session.
-- Every tool goes through the read-only gate (gate.py); `can_use_tool` denies anything that reaches it.
+- Every tool goes through the approval gate (gate.py, policy.py); `can_use_tool` denies anything that reaches it.
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ import sys
 import time
 from typing import Any, Awaitable, Callable
 
-from .gate import BUILTIN_READ, pre_tool_use
+from .gate import Gate
+from .policy import ENABLED_BUILTINS
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
 
 PERSONA = """
@@ -52,6 +53,7 @@ class Brain:
         self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
+        self.gate = Gate(session_id=lambda: self.session_id)
 
     def options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultDeny
@@ -66,9 +68,9 @@ class Brain:
             model=model,
             cwd=os.environ.get("ZOE_HOME", os.path.expanduser("~")),
             setting_sources=[s for s in sources.split(",") if s],
-            tools=sorted(BUILTIN_READ),                      # no Bash / Edit / Write / Web* at all
+            tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use], timeout=10, on_failure="block")]},
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use], timeout=10, on_failure="block")]},
             can_use_tool=deny_all,
             include_partial_messages=True,
             resume=self.session_id,

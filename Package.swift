@@ -11,7 +11,8 @@ let package = Package(
     ],
     dependencies: [
         // ONNX Runtime (MIT) for Silero VAD; same package and version as the F05 wake-word spike.
-        .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager", exact: "1.24.2"),
+        // ONNX Runtime 1.24.2, vendored: the upstream package repository is gone (see vendor/…/Package.swift).
+        .package(path: "vendor/onnxruntime-swift-package-manager"),
         // WhisperKit (MIT) for speech-to-text; same version as the CLI used in the F04 tests.
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift", exact: "1.1.1"),
     ],

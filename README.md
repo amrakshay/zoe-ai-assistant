@@ -74,4 +74,4 @@ Swift menu-bar app                                   Python core (child process,
 
 ## License
 
-[MIT](LICENSE). Reused code keeps its own MIT notices (see PLAN.md §6).
+[MIT](LICENSE). Reused code keeps its own MIT notices (see PLAN.md §6); `vendor/onnxruntime-swift-package-manager` is Microsoft's ONNX Runtime Swift bindings (MIT, its own LICENSE).

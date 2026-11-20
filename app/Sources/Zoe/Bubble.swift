@@ -5,6 +5,7 @@ import SwiftUI
 /// opens as a scrollable card with the full text (PLAN.md §5.12).
 /// A plain value, so the panel can be measured synchronously from a fresh view.
 struct BubbleContent: Equatable {
+    var place = ""            // the session's repo or folder when it isn't home (#30)
     var you = ""
     var reply = ""
     var card = false          // full reply in a scrollable card
@@ -116,6 +117,9 @@ struct BubbleView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if !model.place.isEmpty && !(model.you.isEmpty && model.reply.isEmpty) {
+                Label("in \(model.place)", systemImage: "folder").font(.caption).foregroundStyle(.secondary)
+            }
             if !model.you.isEmpty {
                 Text(model.you)
                     .font(.callout)
@@ -316,14 +320,20 @@ final class BubbleWindow {
     /// A new turn: show what I said.
     func showYou(_ text: String) {
         hideTask?.cancel()
-        model = BubbleContent(you: text, approvals: model.approvals, questions: model.questions, terminals: model.terminals)
+        model = BubbleContent(place: model.place, you: text, approvals: model.approvals, questions: model.questions, terminals: model.terminals)
         relayout()
+    }
+
+    /// Where Zoe is working (#30): a repo or folder name, or "" for home.
+    func setPlace(_ name: String) {
+        model.place = name
+        if !model.isEmpty { relayout() }
     }
 
     /// Live caption while I speak (replaced by Whisper's transcript when the turn ends).
     func showCaption(_ text: String) {
         hideTask?.cancel()
-        model = BubbleContent(you: text, approvals: model.approvals, questions: model.questions, terminals: model.terminals)
+        model = BubbleContent(place: model.place, you: text, approvals: model.approvals, questions: model.questions, terminals: model.terminals)
         relayout()
     }
 
@@ -404,7 +414,7 @@ final class BubbleWindow {
     func hide() {
         hideTask?.cancel()
         panel.orderOut(nil)
-        model = BubbleContent(); hover.on = false
+        model = BubbleContent(place: model.place); hover.on = false
     }
 
     private func scheduleHide(after secs: Double) {

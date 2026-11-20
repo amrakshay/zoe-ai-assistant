@@ -275,30 +275,68 @@ class Brain:
                 self.index.set_status(s.session_id, "idle")
             log(f"closed idle session {str(s.session_id)[:8]} in {s.cwd}")
 
-    async def hand_off(self) -> dict | None:
-        """Open this session in Terminal (#20): stop the turn (pending approvals are denied), close Zoe's own
-        connection so there's never a second writer, and return what the app should run. None: no session yet."""
-        if not self.session_id:
+    def find(self, session_id: str) -> Session | None:
+        """A session by id: one Zoe holds, or one from the index (resumed by id in its stored folder)."""
+        s = next((x for x in self.sessions if x.session_id == session_id), None)
+        if s is None and self.index is not None and (row := self.index.session(session_id)):
+            s = self.new_session(row["cwd"], session_id=session_id)
+            if row.get("status") == "handed_off":
+                s.handed_off, s.fork_next = session_id, True
+        return s
+
+    async def hand_off(self, session_id: str | None = None) -> dict | None:
+        """Open a session (the active one by default) in Terminal (#20, #30): stop its turn (pending approvals are
+        denied), close Zoe's own connection so there's never a second writer, and return what the app should
+        run. None: no such session yet."""
+        s = self.find(session_id) if session_id else self.active
+        if s is None or not s.session_id:
             return None
-        sid = self.session_id
-        await self.interrupt()
-        if self._turn:
+        sid = s.session_id
+        if s is self.active:
+            await self.interrupt()
+            if self._turn:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._turn), 5)
+                except Exception:  # noqa: BLE001 - cancelled or timed out; we disconnect regardless
+                    pass
+        if s.client:
             try:
-                await asyncio.wait_for(asyncio.shield(self._turn), 5)
-            except Exception:  # noqa: BLE001 - cancelled or timed out; we disconnect regardless
-                pass
-        if self.client:
-            try:
-                await self.client.disconnect()
+                await s.client.disconnect()
             except Exception:  # noqa: BLE001
                 pass
-        self.client, self._connecting = None, None
-        self.summarise_soon(self.active)
-        self.handed_off, self.fork_next = sid, True
+        s.client, s._connecting = None, None
+        self.summarise_soon(s)
+        s.handed_off, s.fork_next = sid, True
         if self.index is not None:
             self.index.set_status(sid, "handed_off")
         log(f"handed off session {sid[:8]} to Terminal; the next turn forks it")
-        return {"session_id": sid, "cwd": self.cwd, "command": resume_command(sid)}
+        return {"session_id": sid, "cwd": s.cwd, "command": resume_command(sid)}
+
+    async def activate(self, session_id: str) -> Session | None:
+        """'Continue here' from Recent Sessions (#30): make that session the active one (resumed by id in its
+        stored folder; forked if it was handed off), and pre-connect it."""
+        s = self.find(session_id)
+        if s is None:
+            return None
+        if s is not self.active:
+            self.summarise_soon(self.active)
+        self.active = s
+        s.last_used = time.time()              # so the next utterance continues it
+        await self.send("session_state", session_id=s.session_id, cwd=s.cwd,
+                        name=os.path.basename(s.cwd.rstrip("/")) if s.cwd != home() else "",
+                        handed_off=bool(s.handed_off))
+        self.warm_up()
+        await self.close_extra()
+        return s
+
+    def activity(self, limit: int = 8) -> list[dict]:
+        """Recent sessions for the app's menu (#30): no conversation content beyond the title."""
+        if self.index is None:
+            return []
+        active = self.active.session_id
+        return [{"session_id": r["session_id"], "title": r.get("title") or "Untitled", "cwd": r["cwd"],
+                 "last_used_at": r["last_used_at"], "status": r["status"], "active": r["session_id"] == active}
+                for r in self.index.recent(limit=limit)]
 
     def take_back(self) -> None:
         """Talk to Zoe again about a handed-off session: connect a fork now (the terminal keeps the original)."""
@@ -477,6 +515,7 @@ class Brain:
             self.active.turns.append((text, reply))
             await self.send("say", utterance_id=uid, text="", final=True)
             await self.send("bubble", utterance_id=uid, text=reply, summarised=spoken.held_back)
+            await self.send("sessions_activity", list=self.activity())
             log(f"turn: first sentence {first if first is None else round(first, 2)} s, total {time.monotonic() - t0:.2f} s")
         except asyncio.CancelledError:
             if self.client:

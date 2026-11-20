@@ -35,6 +35,8 @@ class Core:
             await self.send("state", value="idle")
             if self.brain:
                 self.brain.warm_up()
+                if hasattr(self.brain, "activity"):
+                    await self.send("sessions_activity", list=self.brain.activity())
                 if hasattr(self.brain, "load_projects"):
                     self.brain._projects_loading = asyncio.create_task(self.brain.load_projects())
         elif t == "ping":
@@ -68,10 +70,15 @@ class Core:
 
     async def open_session(self, msg: dict[str, Any]) -> None:
         """`open_session {where: terminal}` (#20): hand the conversation to Terminal."""
-        if msg.get("where", "terminal") != "terminal":
-            await self.send("error", message="only Terminal is supported for now")
+        where, sid = msg.get("where", "terminal"), msg.get("id")
+        if where == "zoe" and self.brain and sid:       # Recent Sessions → Continue here (#30)
+            if await self.brain.activate(str(sid)) is None:
+                await self.send("error", message="no such session")
             return
-        info = await self.brain.hand_off() if self.brain else None
+        if where != "terminal":
+            await self.send("error", message="only Terminal and Zoe are supported")
+            return
+        info = await self.brain.hand_off(str(sid) if sid else None) if self.brain else None
         if info is None:
             await self.send("error", message="no conversation to open yet")
             return

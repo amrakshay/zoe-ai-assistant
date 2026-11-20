@@ -203,6 +203,7 @@ if args.contains("--ui-demo") {
             }
             await phase("idle", 4)
             ch.state = .listening; await phase("listening", 4, level: true)
+            bubble.setPlace("zoe-ai-assistant")
             bubble.showYou("What's on my calendar this afternoon?")
             ch.state = .thinking; await phase("thinking", 4)
             ch.state = .talking
@@ -310,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
+    private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
     private var coreOffline = false
     private var voiceState: TurnMachine.UIState = .idle
 
@@ -324,6 +326,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(characterItem)
+        menu.addItem(recentItem)
+        recentItem.submenu = NSMenu()
+        recentItem.isEnabled = false
         menu.addItem(terminalItem)
         menu.addItem(takeBackItem)
         menu.autoenablesItems = false
@@ -441,6 +446,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Recent Sessions (#30): title, folder and age; Continue Here or Open in Terminal.
+    private func updateRecent(_ list: [[String: Any]]) {
+        let sub = NSMenu()
+        let rel = RelativeDateTimeFormatter()
+        rel.unitsStyle = .short
+        for s in list {
+            guard let id = s["session_id"] as? String else { continue }
+            let folder = ((s["cwd"] as? String) ?? "").split(separator: "/").last.map(String.init) ?? ""
+            let when = (s["last_used_at"] as? Double).map { rel.localizedString(for: Date(timeIntervalSince1970: $0), relativeTo: Date()) } ?? ""
+            let item = NSMenuItem(title: "\(s["title"] as? String ?? "Untitled") — \(folder) · \(when)", action: nil, keyEquivalent: "")
+            if (s["active"] as? Bool) == true { item.state = .on }
+            let actions = NSMenu()
+            let cont = NSMenuItem(title: "Continue Here", action: #selector(recentAction(_:)), keyEquivalent: "")
+            cont.representedObject = ["id": id, "where": "zoe"]; cont.target = self
+            let term = NSMenuItem(title: "Open in Terminal", action: #selector(recentAction(_:)), keyEquivalent: "")
+            term.representedObject = ["id": id, "where": "terminal"]; term.target = self
+            actions.addItem(cont); actions.addItem(term)
+            item.submenu = actions
+            sub.addItem(item)
+        }
+        recentItem.submenu = sub
+        recentItem.isEnabled = !list.isEmpty
+    }
+
+    @objc private func recentAction(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String], let id = info["id"], let w = info["where"] else { return }
+        link.send(CoreMessage("open_session", ["id": id, "where": w]))
+    }
+
     /// Hands the conversation to Terminal (`claude --resume`), so Zoe stops writing to it (#20).
     @objc private func openConversationInTerminal() {
         link.send(CoreMessage("open_session", ["where": "terminal"]))
@@ -505,7 +539,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "sessions_activity":
+            updateRecent(m["list"] as? [[String: Any]] ?? [])
         case "session_state":
+            if let name = m.string("name") { bubble.setPlace(name) }
             handedOff = (m["handed_off"] as? Bool) == true
             takeBackItem.isEnabled = handedOff
             if (m["forked"] as? Bool) == true { print("[metrics] handed-off conversation forked") }

@@ -6,3 +6,15 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+  - package-ecosystem: uv
+    directory: /core
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore

@@ -7,7 +7,7 @@ Guidance for AI coding assistants working on Zoe. User-facing documentation live
 Zoe is a macOS voice assistant that does its work through Claude Code:
 - **App:** Swift 6 / SwiftUI + AppKit, macOS 26+, Apple Silicon, SwiftPM only (builds with the Command Line Tools).
 - **Core:** Python 3.11+ (uv), a child process of the app, JSON lines over stdin/stdout. It owns the Claude Agent SDK, router, approval gate, session index, jobs and watchers.
-- **Status:** phase 0 (feasibility) is done; phase 1 (voice loop) is next. See PLAN.md §8.
+- **Status:** phases 0 (feasibility) and 1 (voice loop) are done; results in `docs/phase-1-results.md`. Phase 2 is next. See PLAN.md §8.
 
 ## Layout
 
@@ -18,7 +18,26 @@ Zoe is a macOS voice assistant that does its work through Claude Code:
 | `feasibility/` | Phase 0 reports (`F01`–`F07`), summary, and spike code under `spikes/` |
 | `mock/` | Interactive HTML mock of the flows |
 | `scripts/ci-checks.sh` | Repo checks run by CI (privacy, syntax, version) |
-| `app/`, `core/` | Arrive in phase 1 (layout in PLAN.md §7 Components) |
+| `Package.swift`, `app/Sources/` | Swift: `ZoeKit` (UI-free logic: JSON-lines framing, core supervision), `Zoe` (menu-bar app), `SelfTest` (`zoe-selftest`) |
+| `core/` | Python core (uv): `src/zoe_core/` (`main.py` stdio loop, `protocol.py`), `tests/` (pytest) |
+
+## Commands
+
+```bash
+cd core && uv sync && uv run pytest -q
+```
+
+```bash
+swift build && swift run zoe-selftest
+```
+
+```bash
+swift run Zoe --smoke "hello"
+```
+
+- App bundle: `./scripts/build-app.sh && ./scripts/package-release.sh && ./scripts/check-version.sh`. Resource use while Zoe runs: `python3 scripts/measure.py`. Without speaking: `swift run Zoe --ui-demo`, `--speak-test`, `--stt-bench <wav>`, `--listen-test N`.
+- Run the self-test and the core tests after any change; the self-test must print `ALL CHECKS PASSED`.
+- The core writes protocol messages only to stdout; logs go to stderr.
 
 ## Rules that must not regress
 

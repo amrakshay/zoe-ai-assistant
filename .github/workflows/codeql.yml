@@ -1,8 +1,8 @@
 name: CodeQL
 
 # Weekly and on demand only, as in maclens: CodeQL isn't a required check, so it doesn't run on pull requests
-# or pushes to main. Run it manually on a branch before merging anything security-sensitive (the approval gate).
-# Phase 1 adds `swift` (build-mode: manual, `swift build`, on macos-26) once the app exists.
+# or pushes to main (a Swift scan takes ~15 min). Run it manually on a branch before merging anything
+# security-sensitive (the approval gate).
 on:
   schedule:
     - cron: "23 4 * * 1"   # weekly
@@ -25,4 +25,15 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+      - uses: github/codeql-action/analyze@v4
+
+  analyze-swift:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: swift
+          build-mode: manual
+      - run: swift build
       - uses: github/codeql-action/analyze@v4

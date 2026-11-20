@@ -14,14 +14,54 @@ concurrency:
 
 jobs:
   # Keep this job name: it's the required status check on main.
-  # Phase 1 adds: swift build, self-test (Swift app + Python core gate policy tests), build-app.sh,
-  # package-release.sh, the full version check and the Homebrew cask lint (see PLAN.md §8, phase 1).
   build-and-test:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0   # build number = commit count (phase 1)
+          fetch-depth: 0   # build number = commit count
       - run: swift --version
       - name: Repo checks (privacy, syntax, version)
         run: ./scripts/ci-checks.sh
+      - uses: astral-sh/setup-uv@v6
+      - name: Core tests
+        working-directory: core
+        run: uv sync --locked && uv run pytest -q
+      - name: Build (debug)
+        run: swift build
+      - name: Self-test
+        run: swift run zoe-selftest
+      - name: Smoke test (app ↔ core, echo brain; CI has no Claude login)
+        env:
+          ZOE_BRAIN: echo
+        run: swift run Zoe --smoke "hello from CI"
+      - name: Build app bundle (release)
+        run: ./scripts/build-app.sh
+      - name: Package
+        run: ./scripts/package-release.sh
+      - name: Check version consistency
+        run: ./scripts/check-version.sh
+      - name: Bundled core starts (echo brain)
+        env:
+          ZOE_BRAIN: echo
+        run: |
+          out=$(printf '%s\n' '{"type":"utterance","id":"ci","text":"bundle","trigger":"text"}' | dist/Zoe.app/Contents/Resources/core/launch.sh)
+          echo "$out"
+          echo "$out" | grep -q '"You said: bundle"'
+          codesign --verify --deep --strict dist/Zoe.app   # the core must not write into the bundle
+      - name: Lint Homebrew cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          brew tap-new --no-git zoe/ci                          # throwaway local tap: brew only lints casks inside a tap
+          mkdir -p "$(brew --repository zoe/ci)/Casks"
+          cp dist/zoe.rb "$(brew --repository zoe/ci)/Casks/zoe.rb"
+          brew trust --cask zoe/ci/zoe                          # Homebrew 7 refuses to load casks from untrusted taps
+          brew style --cask zoe/ci/zoe
+          brew audit --cask zoe/ci/zoe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Zoe-${{ github.sha }}
+          path: dist/Zoe-*.zip
+          retention-days: 7

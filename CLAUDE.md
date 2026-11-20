@@ -7,7 +7,7 @@ Guidance for AI coding assistants working on Zoe. User-facing documentation live
 Zoe is a macOS voice assistant that does its work through Claude Code:
 - **App:** Swift 6 / SwiftUI + AppKit, macOS 26+, Apple Silicon, SwiftPM only (builds with the Command Line Tools).
 - **Core:** Python 3.11+ (uv), a child process of the app, JSON lines over stdin/stdout. It owns the Claude Agent SDK, router, approval gate, session index, jobs and watchers.
-- **Status:** phases 0 (feasibility) and 1 (voice loop) are done; results in `docs/phase-1-results.md`. Phase 2 is next. See PLAN.md §8.
+- **Status:** phases 0 (feasibility), 1 (voice loop) and 2 (safety: approvals, questions, Terminal handoff) are done; results in `docs/phase-1-results.md` and `docs/phase-2-results.md`. Phase 3 (sessions) is next. See PLAN.md §8.
 
 ## Layout
 

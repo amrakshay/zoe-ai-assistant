@@ -527,7 +527,8 @@ The baseline still excludes Claude Code's own processes. They're stated separate
 | 7 | Rive transparent panel | ✔ (drag and full-screen to check by hand) |
 | 8 | Call detection | ✔ |
 | — | Accessibility-dependent checks (context, push-to-talk, paste) | ✔ granted 2026-11-17: window title, selection in native apps, paste, right-⌥ and ⌃⌥Space push-to-talk all work. ⚠ selection in Chromium apps unverified |
-| — | Barge-in, two voice-processing apps at once, hook waits over 70 s, token refresh | ⏳ phase 1 / 2 |
+| — | Hook waits | ✔ (#15, 2026-11-20): a `PreToolUse` hook that waited 30, 90 and 150 s had its decision honoured each time (hook `timeout` 600 s, Haiku, `Read`). Zoe's approvals time out at 120 s, the hook's limit is 150 s |
+| — | Barge-in, two voice-processing apps at once, token refresh | ⏳ later phases |
 
 **Ready for phase 1 when:**
 - ✔ IT confirms use of the Team plan (2026-11-17),

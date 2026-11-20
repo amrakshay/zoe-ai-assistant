@@ -165,6 +165,9 @@ for line in sys.stdin:
     t = m["type"]
     if t == "hello": print(json.dumps({"type": "hello", "pid": os.getpid()}), flush=True)
     elif t == "ping": print(json.dumps({"type": "pong", "id": m.get("id")}), flush=True)
+    elif t == "ask": print(json.dumps({"type": "pending_input", "id": m["id"], "kind": "approval", "card": {}}), flush=True)
+    elif t == "withdraw": print(json.dumps({"type": "dismiss_panel", "id": m["id"]}), flush=True)
+    elif t == "answer": print(json.dumps({"type": "answered", "pending_id": m["pending_id"], "value": m["value"], "via": m["via"]}), flush=True)
     elif t == "crash": os._exit(3)
     elif t == "shutdown": break
 """
@@ -196,7 +199,14 @@ print(String(format: "       (spawn → ready %.0f ms)", Date().timeIntervalSinc
 link.send(CoreMessage("ping", ["id": 42]))
 check("ping → pong", waitFor(2) { box.lock.withLock { box.messages.contains { $0.type == "pong" && ($0["id"] as? Int) == 42 } } })
 
-link.pending.add("approval-1"); link.pending.add("approval-2")
+for id in ["approval-1", "approval-2", "approval-3", "approval-4"] { link.send(CoreMessage("ask", ["id": id])) }
+check("pending_input is recorded as waiting", waitFor(2) { link.pending.count == 4 })
+link.send(CoreMessage("withdraw", ["id": "approval-3"]))
+check("dismiss_panel withdraws it", waitFor(2) { link.pending.count == 3 })
+link.answer(pendingID: "approval-4", value: "approve", via: "click")
+check("my answer reaches the core and is no longer pending",
+      waitFor(2) { box.lock.withLock { box.messages.contains { $0.type == "answered" && $0.string("pending_id") == "approval-4" && $0.string("value") == "approve" } } }
+      && link.pending.count == 2)
 let crashAt = Date()
 link.send(CoreMessage("crash"))
 check("crash is reported as offline", waitFor(2) { box.lock.withLock { box.states.contains { if case .offline = $0 { return true } else { return false } } } })

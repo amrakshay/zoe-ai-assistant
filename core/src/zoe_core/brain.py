@@ -15,6 +15,7 @@ import sys
 import time
 from typing import Any, Awaitable, Callable
 
+from .approvals import Approvals
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
@@ -27,8 +28,9 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
   that the details are on screen; the app says so.
 - Be direct and warm. Don't narrate your tool use. Never ask the user to type.
 - Never use plan mode. Never run interactive commands.
-- You can only read in this version. If asked to change, send, create or run something, say you can't do
-  that yet in one sentence.
+- To change, send, create or run something, just call the tool: Zoe shows the user an approval card and
+  waits for their answer, so don't ask for permission in words first. If it's declined or not answered,
+  say so in one short sentence and don't retry.
 """.strip()
 
 Send = Callable[..., Awaitable[None]]
@@ -53,7 +55,8 @@ class Brain:
         self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
-        self.gate = Gate(session_id=lambda: self.session_id)
+        self.approvals = Approvals(send, session_id=lambda: self.session_id)
+        self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
 
     def options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultDeny
@@ -70,7 +73,8 @@ class Brain:
             setting_sources=[s for s in sources.split(",") if s],
             tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use], timeout=10, on_failure="block")]},
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use],
+                                                          timeout=self.approvals.timeout + 30, on_failure="block")]},
             can_use_tool=deny_all,
             include_partial_messages=True,
             resume=self.session_id,
@@ -105,6 +109,7 @@ class Brain:
         self._turn = asyncio.create_task(self._run(utterance_id, text))
 
     async def interrupt(self) -> None:
+        self.approvals.cancel_all("interrupt")   # hooks wait in the SDK's task, not the turn's
         if self._turn and not self._turn.done():
             self._turn.cancel()
 

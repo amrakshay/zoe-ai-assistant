@@ -39,6 +39,9 @@ class Core:
             await self.send("pong", id=msg.get("id"), uptime_s=round(time.monotonic() - self.started, 3))
         elif t == "utterance":
             await self.handle_utterance(msg)
+        elif t == "answer":
+            if not (self.brain and self.brain.approvals.answer(msg)):
+                await self.send("error", message=f"answer for unknown or finished request: {msg.get('pending_id')}")
         elif t == "user_interrupted":
             if self.brain:
                 await self.brain.interrupt()

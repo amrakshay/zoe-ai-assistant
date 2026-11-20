@@ -101,6 +101,13 @@ public final class CoreLink: @unchecked Sendable {
 
     public func start() { queue.async { self.stopping = false; self.launch() } }
 
+    /// My answer to a pending input: sent to the core and no longer pending.
+    public func answer(pendingID: String, value: String, via: String) {
+        pending.resolve(pendingID)
+        send(CoreMessage("answer", ["pending_id": pendingID, "value": value, "via": via,
+                                    "at": Date().timeIntervalSince1970]))
+    }
+
     /// Asks the core to exit, then terminates it if it hasn't within a second.
     public func stop() {
         queue.sync {
@@ -168,6 +175,9 @@ public final class CoreLink: @unchecked Sendable {
                 if m.type == "hello", case .starting = state {
                     setState(.ready(pid: process?.processIdentifier ?? 0))
                 }
+                // Track what's waiting for me, so a core restart can deny it all (PLAN.md §3).
+                if m.type == "pending_input", let id = m.string("id") { pending.add(id) }
+                if m.type == "dismiss_panel", let id = m.string("id") { pending.resolve(id) }
                 let cb = onMessage
                 callbackQueue.async { cb?(m) }
             case .failure(let e):

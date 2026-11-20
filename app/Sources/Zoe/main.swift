@@ -58,6 +58,13 @@ if let i = args.firstIndex(of: "--smoke") {
                 } else { done.signal() }
             }
         case "state": print("assistant: \(m.string("value") ?? "?")")
+        case "pending_input":
+            // ZOE_SMOKE_ANSWER=approve|deny answers approval cards by "click" (end-to-end gate tests); else deny.
+            let id = m.string("id") ?? ""
+            let value = ProcessInfo.processInfo.environment["ZOE_SMOKE_ANSWER"] == "approve" ? "approve" : "deny"
+            let card = m["card"] as? [String: Any]
+            print("approval asked: \(card?["title"] as? String ?? "?") → \(value)")
+            link.answer(pendingID: id, value: value, via: "click")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break
         }
@@ -181,6 +188,20 @@ if args.contains("--ui-demo") {
             schedule once the cluster has room.
             """, summarised: true)
             await phase("card", 4, level: true)
+            bubble.showYou("Tell the team the build is green.")
+            if let a = ApprovalCard(message: ["id": "demo-1", "voice_ok": true, "card": [
+                "title": "Send a Slack message?",
+                "fields": [["label": "To", "value": "#team-builds", "mono": false],
+                           ["label": "Message", "value": "The build is green again: the flaky test is fixed.", "mono": false]],
+                "why": "Sends a message as you."] as [String: Any]]) { bubble.showApproval(a) }
+            if let b = ApprovalCard(message: ["id": "demo-2", "voice_ok": false, "card": [
+                "title": "Run a command?", "fields": [["label": "Command", "value": "git push origin main", "mono": true]],
+                "why": "Runs a command: needs a click."] as [String: Any]]) { bubble.showApproval(b) }
+            ch.state = .thinking
+            await phase("approval", 4)
+            bubble.removeApproval("demo-1")
+            await phase("approval2", 3)
+            bubble.removeApproval("demo-2")
             ch.state = .offline; bubble.hide(); await phase("offline", 2)
             ch.state = .idle; await phase("idle-after", 6)
             var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
@@ -278,6 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voice.speaker.onLevel = { [weak self] v in self?.character.level(v) }
         voice.onReplyDone = { [weak self] in self?.bubble.replyDone() }
         voice.onCaption = { [weak self] t in self?.bubble.showCaption(t) }
+        bubble.onAnswer = { [weak self] id, approved in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: approved ? "approve" : "deny", via: "click")
+            self.bubble.removeApproval(id)
+            print("[metrics] approval \(approved ? "approved" : "denied") by click")
+        }
         voice.onUIState = { [weak self] st in
             guard let self else { return }
             self.voiceState = st
@@ -330,7 +357,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         link.onLog = { FileHandle.standardError.write(Data($0.utf8)) }
         link.onState = { [weak self] s in MainActor.assumeIsolated { self?.show(s) } }
         link.onMessage = { [weak self] m in MainActor.assumeIsolated { self?.handle(m) } }
-        link.onPendingDenied = { ids in print("core restarted: denied \(ids.count) pending approval(s)") }
+        link.onPendingDenied = { [weak self] ids in
+            MainActor.assumeIsolated { for id in ids { self?.bubble.removeApproval(id) } }
+            print("core restarted: denied \(ids.count) pending approval(s)")
+        }
         link.start()
     }
 
@@ -352,6 +382,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let id = m.string("utterance_id"), id == dropped { return }
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
+        case "pending_input":
+            guard m.string("kind") == "approval", let card = ApprovalCard(message: m.fields) else { return }
+            bubble.showApproval(card)
+            NSSound(named: "Glass")?.play()           // something needs me; voice approvals come in #17
+        case "dismiss_panel":
+            if let id = m.string("id") { bubble.removeApproval(id) }
         case "bubble":
             if let id = m.string("utterance_id"), id == dropped { return }
             bubble.showFullReply(m.string("text") ?? "", summarised: (m["summarised"] as? Bool) == true)

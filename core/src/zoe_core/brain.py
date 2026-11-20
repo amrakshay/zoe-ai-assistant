@@ -5,7 +5,7 @@
 - Loads my user, project and local settings, so plugins, connectors and CLAUDE.md context are there.
   The session connects at core start, so the slow first connect (my SessionStart hook, ~11 s in F01)
   happens at launch, not on the first question. Follow-up turns reuse the same session.
-- Every tool goes through the read-only gate (gate.py); `can_use_tool` denies anything that reaches it.
+- Every tool goes through the approval gate (gate.py, policy.py); `can_use_tool` denies anything that reaches it.
 """
 from __future__ import annotations
 
@@ -15,7 +15,12 @@ import sys
 import time
 from typing import Any, Awaitable, Callable
 
-from .gate import BUILTIN_READ, pre_tool_use
+from .approvals import Approvals
+from .names import Names
+from .renderers import render
+from .terminal import TerminalHandoff
+from .gate import Gate
+from .policy import ENABLED_BUILTINS
 from .speech import READ_ALL, SentenceSplitter, SpokenReply
 
 PERSONA = """
@@ -26,8 +31,14 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
   that the details are on screen; the app says so.
 - Be direct and warm. Don't narrate your tool use. Never ask the user to type.
 - Never use plan mode. Never run interactive commands.
-- You can only read in this version. If asked to change, send, create or run something, say you can't do
-  that yet in one sentence.
+- To change, send, create or run something, just call the tool: Zoe shows the user an approval card and
+  waits for their answer, so don't ask for permission in words first. If it's declined or not answered,
+  say so in one short sentence and don't retry.
+- The user's words come from speech-to-text, which can mishear short technical words ("ls" as "is"). If a
+  request to run, change or send something is unclear or doesn't quite make sense, say what you understood in
+  one sentence and ask before doing anything; don't go exploring to guess.
+- Before sending to a Slack user or channel by ID, look it up first (slack_read_user_profile with its user_id,
+  or slack_search_channels), so the approval card can show its name.
 """.strip()
 
 Send = Callable[..., Awaitable[None]]
@@ -44,6 +55,19 @@ def scrub_env() -> None:
             os.environ.pop(k, None)
 
 
+def resume_command(session_id: str) -> str:
+    """`claude --resume <id>`: my own claude if it's on the PATH, else the copy the Agent SDK ships (same login and
+    settings either way)."""
+    import shlex
+    try:
+        import claude_agent_sdk
+        bundled = os.path.join(os.path.dirname(claude_agent_sdk.__file__), "_bundled", "claude")
+    except Exception:  # noqa: BLE001
+        bundled = "claude"
+    sid = shlex.quote(session_id)
+    return f"if command -v claude >/dev/null; then claude --resume {sid}; else {shlex.quote(bundled)} --resume {sid}; fi"
+
+
 class Brain:
     def __init__(self, send: Send) -> None:
         self.send = send
@@ -52,26 +76,76 @@ class Brain:
         self.last_reply = ""
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
+        self.names = Names()
+        self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id)
+        self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
+        self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
+        # Handoff (#20): once the session is opened in Terminal, Zoe never writes to it again; the next turn
+        # forks it (the terminal keeps the original). PLAN.md §5.10.
+        self.handed_off: str | None = None
+        self.fork_next = False
+
+    @property
+    def cwd(self) -> str:
+        return os.environ.get("ZOE_HOME", os.path.expanduser("~"))
+
+    async def hand_off(self) -> dict | None:
+        """Open this session in Terminal (#20): stop the turn (pending approvals are denied), close Zoe's own
+        connection so there's never a second writer, and return what the app should run. None: no session yet."""
+        if not self.session_id:
+            return None
+        sid = self.session_id
+        await self.interrupt()
+        if self._turn:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._turn), 5)
+            except Exception:  # noqa: BLE001 - cancelled or timed out; we disconnect regardless
+                pass
+        if self.client:
+            try:
+                await self.client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+        self.client, self._connecting = None, None
+        self.handed_off, self.fork_next = sid, True
+        log(f"handed off session {sid[:8]} to Terminal; the next turn forks it")
+        return {"session_id": sid, "cwd": self.cwd, "command": resume_command(sid)}
+
+    def take_back(self) -> None:
+        """Talk to Zoe again about a handed-off session: connect a fork now (the terminal keeps the original)."""
+        if self.handed_off:
+            self.fork_next = True
+            self.warm_up()
 
     def options(self):
-        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultDeny
+        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, PermissionResultAllow, PermissionResultDeny
 
-        async def deny_all(tool_name, tool_input, ctx):  # final catch-all: the hook already decided
-            return PermissionResultDeny(message="Blocked: not on Zoe's read-only allowlist.")
+        async def can_use_tool(tool_name, tool_input, ctx):
+            # Only AskUserQuestion is meant to get here (the hook decides everything else); the rest is denied.
+            if tool_name == "AskUserQuestion":
+                updated = await self.approvals.question(tool_input)
+                if updated is not None:
+                    return PermissionResultAllow(updated_input=updated)
+                return PermissionResultDeny(message="The user didn't answer. Don't ask again; go on without it or stop.")
+            return PermissionResultDeny(message="Blocked: this didn't go through Zoe's approval gate.")
 
         # Sonnet by default: warm calendar turn 3.7 s to the first sentence (Haiku 2.7 s, my default Opus ~8 s).
         model = os.environ.get("ZOE_MODEL", "claude-sonnet-5-5")
         sources = os.environ.get("ZOE_SETTING_SOURCES", "user,project,local")
         return ClaudeAgentOptions(
             model=model,
-            cwd=os.environ.get("ZOE_HOME", os.path.expanduser("~")),
+            cwd=self.cwd,
             setting_sources=[s for s in sources.split(",") if s],
-            tools=sorted(BUILTIN_READ),                      # no Bash / Edit / Write / Web* at all
+            tools=sorted(ENABLED_BUILTINS),                  # every one of them goes through the gate
             system_prompt={"type": "preset", "preset": "claude_code", "append": PERSONA},
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use], timeout=10, on_failure="block")]},
-            can_use_tool=deny_all,
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self.gate.pre_tool_use],
+                                                          timeout=self.approvals.timeout + 30, on_failure="block")],
+                   "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
+                   "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
+            can_use_tool=can_use_tool,
             include_partial_messages=True,
             resume=self.session_id,
+            fork_session=bool(self.fork_next and self.session_id),
         )
 
     def warm_up(self) -> None:
@@ -103,6 +177,7 @@ class Brain:
         self._turn = asyncio.create_task(self._run(utterance_id, text))
 
     async def interrupt(self) -> None:
+        self.approvals.cancel_all("interrupt")   # hooks wait in the SDK's task, not the turn's
         if self._turn and not self._turn.done():
             self._turn.cancel()
 
@@ -126,6 +201,7 @@ class Brain:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
+        self.gate.taint.user_said(text)          # domains I name myself don't need approval (#18)
         if READ_ALL.match(text.strip()) and self.last_reply:
             await self._read_all(uid)
             return
@@ -173,6 +249,10 @@ class Brain:
                             got = splitter.flush()
                             await say(got, splitter.breaks)
                 elif isinstance(m, ResultMessage):
+                    if self.fork_next and m.session_id != self.handed_off:
+                        log(f"forked {str(self.handed_off)[:8]} → {m.session_id[:8]}")
+                        self.fork_next, self.handed_off = False, None
+                        await self.send("session_state", session_id=m.session_id, handed_off=False, forked=True)
                     self.session_id = m.session_id
             got = splitter.flush()
             await say(got, splitter.breaks)

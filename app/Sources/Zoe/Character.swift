@@ -42,6 +42,8 @@ final class CharacterWindow {
     var isVisible: Bool { panel.isVisible }
 
     var state: State = .idle { didSet { if state != oldValue { orb.apply(state) } } }
+    /// How many things wait for me (approvals, questions, Terminal cards): the badge (#21).
+    var waiting = 0 { didSet { if waiting != oldValue { orb.setWaiting(waiting) } } }
     func level(_ v: Float) { orb.level(v) }
 
     private func savePosition() {
@@ -74,6 +76,9 @@ final class OrbView: NSView {
     private let arc = CAShapeLayer()
     private let eyes = CALayer()
     private let leftEye = CALayer(), rightEye = CALayer()
+    private let badge = CALayer()
+    private let badgeText = CATextLayer()
+    private let hand = CATextLayer()
     private var state: CharacterWindow.State = .idle
     private var smoothed: Float = 0
     private var dragStart: NSPoint?
@@ -123,6 +128,22 @@ final class OrbView: NSView {
             eyes.addSublayer(e)
         }
         layer?.addSublayer(eyes)
+
+        // Count badge (#21): amber, top right of the orb; a raised hand at top left while anything waits.
+        let bd: CGFloat = 22
+        badge.frame = CGRect(x: r.maxX - bd + 6, y: r.maxY - bd + 6, width: bd, height: bd)
+        badge.cornerRadius = bd / 2
+        badge.backgroundColor = CGColor(red: 1.0, green: 0.62, blue: 0.10, alpha: 1)
+        badge.borderColor = CGColor(gray: 1, alpha: 0.95); badge.borderWidth = 2
+        badgeText.frame = badge.bounds.offsetBy(dx: 0, dy: -3)
+        badgeText.alignmentMode = .center
+        badgeText.fontSize = 12; badgeText.font = NSFont.boldSystemFont(ofSize: 12)
+        badgeText.foregroundColor = CGColor(gray: 1, alpha: 1)
+        badgeText.contentsScale = 2
+        badge.addSublayer(badgeText)
+        hand.string = "✋"; hand.fontSize = 18; hand.contentsScale = 2
+        hand.frame = CGRect(x: r.minX - 12, y: r.maxY - 14, width: 26, height: 26)
+        for l in [badge, hand] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
 
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
         apply(.idle)
@@ -189,6 +210,15 @@ final class OrbView: NSView {
             eyes.add(blink, forKey: "blink")
         }
         smoothed = 0
+    }
+
+    func setWaiting(_ n: Int) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.2)
+        badgeText.string = n > 9 ? "9+" : "\(n)"
+        badge.opacity = n > 0 ? 1 : 0
+        hand.opacity = n > 0 ? 1 : 0
+        CATransaction.commit()
     }
 
     /// Mic level while listening, Zoe's voice level while talking.

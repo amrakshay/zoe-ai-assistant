@@ -29,7 +29,8 @@ public final class Speaker {
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     private var format: AVAudioFormat?
-    private var queue: [String] = []
+    public typealias Played = @MainActor @Sendable () -> Void
+    private var queue: [(text: String, onPlayed: Played?)] = []
     private var synthesizing = false
     private var pendingBuffers = 0
     private var replyOpen = false          // more sentences may come
@@ -76,13 +77,14 @@ public final class Speaker {
         for b in ack { schedule(b, gen: generation) }
     }
 
-    /// Queues a sentence of the current reply.
-    public func enqueue(_ text: String) {
+    /// Queues a sentence of the current reply. `onPlayed` runs once this sentence has been heard to the end
+    /// (not just synthesised): approvals listen for a "yes" only after their prompt finished (#17).
+    public func enqueue(_ text: String, onPlayed: Played? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty else { onPlayed?(); return }
         beginReplyIfNeeded()
-        if awaitingFirstAudio { firstEnqueueAt = firstEnqueueAt ?? Self.now() }
-        queue.append(t)
+        if awaitingFirstAudio && onPlayed == nil { firstEnqueueAt = firstEnqueueAt ?? Self.now() }
+        queue.append((t, onPlayed))
         pump()
     }
 
@@ -115,7 +117,7 @@ public final class Speaker {
     private func pump() {
         guard !synthesizing, !queue.isEmpty else { return }
         synthesizing = true
-        let text = queue.removeFirst()
+        let (text, onPlayed) = queue.removeFirst()
         let gen = generation
         let u = AVSpeechUtterance(string: text)
         u.voice = voice
@@ -125,6 +127,7 @@ public final class Speaker {
             MainActor.assumeIsolatedOrHop { [weak self] in
                 guard let self, gen == self.generation else { return }
                 if let copy { self.schedule(copy, gen: gen) } else {
+                    if let onPlayed { self.scheduleMarker(gen: gen, then: onPlayed) }
                     self.synthesizing = false
                     self.pump()
                     self.checkDone()
@@ -145,6 +148,23 @@ public final class Speaker {
             MainActor.assumeIsolatedOrHop { [weak self] in
                 guard let self, gen == self.generation else { return }
                 self.pendingBuffers -= 1
+                self.checkDone()
+            }
+        }
+        if !p.isPlaying { p.play() }
+    }
+
+    /// A one-frame silent buffer behind the sentence's own: buffers play in order, so its completion means the
+    /// sentence has been heard. If nothing was scheduled (no engine), runs `then` at once.
+    private func scheduleMarker(gen: Int, then: @escaping Played) {
+        guard let f = format, let p = player, let b = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: 1) else { then(); return }
+        b.frameLength = 1          // zero-filled
+        pendingBuffers += 1
+        p.scheduleBuffer(b, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            MainActor.assumeIsolatedOrHop { [weak self] in
+                guard let self, gen == self.generation else { return }
+                self.pendingBuffers -= 1
+                then()
                 self.checkDone()
             }
         }

@@ -156,6 +156,57 @@ do {
     }
 }
 
+// MARK: voice answers to approval cards (#17)
+print("Voice answers")
+do {
+    let yes = ["Yes", "yes.", "Yeah, go ahead", "Sure", "OK", "okay do it", "Send it", "Sounds good!", "Approve"]
+    let no = ["No", "nope", "Cancel that", "Don't", "Yes, cancel it", "wait", "no, don't send it", "Okay no"]
+    let unclear = ["", "Hmm", "maybe", "What does it say?", "yes please send it to the whole company right now",
+                   "Change the message first"]
+    check("yes answers", yes.allSatisfy { VoiceAnswer.classify($0) == .yes }, "\(yes.filter { VoiceAnswer.classify($0) != .yes })")
+    check("no answers, and a no anywhere wins", no.allSatisfy { VoiceAnswer.classify($0) == .no }, "\(no.filter { VoiceAnswer.classify($0) != .no })")
+    check("anything else is unclear", unclear.allSatisfy { VoiceAnswer.classify($0) == .unclear }, "\(unclear.filter { VoiceAnswer.classify($0) != .unclear })")
+    check("speech that began during the prompt doesn't count", !VoiceAnswer.accepted(speechStart: 9.95, promptEnd: 10))
+    check("…nor within the echo tail", !VoiceAnswer.accepted(speechStart: 10.05, promptEnd: 10))
+    check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
+}
+
+// MARK: spoken answers to Claude's questions (#19)
+print("Option matching")
+do {
+    let l = ["Summary", "Detailed report", "Skip"]
+    check("a label said in a sentence", OptionMatch.match("Detailed report, please", labels: l, multiSelect: false) == ["Detailed report"])
+    check("case and punctuation don't matter", OptionMatch.match("summary!", labels: l, multiSelect: false) == ["Summary"])
+    check("ordinals pick by position", OptionMatch.match("the second one", labels: l, multiSelect: false) == ["Detailed report"])
+    check("'last' picks the last", OptionMatch.match("the last", labels: l, multiSelect: false) == ["Skip"])
+    check("two labels for a single choice is ambiguous", OptionMatch.match("summary or skip", labels: l, multiSelect: false) == [])
+    check("multi-select takes every label said", OptionMatch.match("summary and skip", labels: l, multiSelect: true) == ["Summary", "Skip"])
+    check("'both' / 'all' in multi-select", OptionMatch.match("all of them", labels: l, multiSelect: true) == l)
+    check("a partial label isn't a match", OptionMatch.match("detailed", labels: l, multiSelect: false) == [])
+    check("no match → [] (sent as typed text)", OptionMatch.match("something else entirely", labels: l, multiSelect: false) == [])
+}
+
+// MARK: Open in Terminal scripts (#19)
+print("Terminal scripts")
+do {
+    check("quoting survives quotes", TerminalScript.quote("it's") == "'it'\\''s'")
+    let s = TerminalScript.script(command: "sudo true", cwd: "/tmp/a b'c")
+    check("goes to the folder, quoted", s.contains("cd '/tmp/a b'\\''c'"))
+    check("runs exactly the command", s.contains("\nsudo true\n"))
+    check("clears inherited Claude Code variables first", s.contains("unset -m 'CLAUDE*' 'ANTHROPIC*'"))
+    check("empty folder → home", TerminalScript.script(command: "claude", cwd: "").contains("cd $HOME"))
+    let url = try TerminalScript.write(command: "echo hi", cwd: "/tmp")
+    let p = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0
+    check("written as a private .command file", url.pathExtension == "command" && p == 0o700)
+    // It must parse as zsh.
+    let z = Process(); z.executableURL = URL(fileURLWithPath: "/bin/zsh"); z.arguments = ["-n", url.path]
+    try z.run(); z.waitUntilExit()
+    check("the script parses (zsh -n)", z.terminationStatus == 0)
+    try? FileManager.default.removeItem(at: url)
+} catch {
+    check("terminal script", false, "\(error)")
+}
+
 // MARK: supervision with a fake core
 print("Core link supervision")
 let fakeCore = """
@@ -165,6 +216,9 @@ for line in sys.stdin:
     t = m["type"]
     if t == "hello": print(json.dumps({"type": "hello", "pid": os.getpid()}), flush=True)
     elif t == "ping": print(json.dumps({"type": "pong", "id": m.get("id")}), flush=True)
+    elif t == "ask": print(json.dumps({"type": "pending_input", "id": m["id"], "kind": "approval", "card": {}}), flush=True)
+    elif t == "withdraw": print(json.dumps({"type": "dismiss_panel", "id": m["id"]}), flush=True)
+    elif t == "answer": print(json.dumps({"type": "answered", "pending_id": m["pending_id"], "value": m["value"], "via": m["via"]}), flush=True)
     elif t == "crash": os._exit(3)
     elif t == "shutdown": break
 """
@@ -196,7 +250,14 @@ print(String(format: "       (spawn → ready %.0f ms)", Date().timeIntervalSinc
 link.send(CoreMessage("ping", ["id": 42]))
 check("ping → pong", waitFor(2) { box.lock.withLock { box.messages.contains { $0.type == "pong" && ($0["id"] as? Int) == 42 } } })
 
-link.pending.add("approval-1"); link.pending.add("approval-2")
+for id in ["approval-1", "approval-2", "approval-3", "approval-4"] { link.send(CoreMessage("ask", ["id": id])) }
+check("pending_input is recorded as waiting", waitFor(2) { link.pending.count == 4 })
+link.send(CoreMessage("withdraw", ["id": "approval-3"]))
+check("dismiss_panel withdraws it", waitFor(2) { link.pending.count == 3 })
+link.answer(pendingID: "approval-4", value: "approve", via: "click")
+check("my answer reaches the core and is no longer pending",
+      waitFor(2) { box.lock.withLock { box.messages.contains { $0.type == "answered" && $0.string("pending_id") == "approval-4" && $0.string("value") == "approve" } } }
+      && link.pending.count == 2)
 let crashAt = Date()
 link.send(CoreMessage("crash"))
 check("crash is reported as offline", waitFor(2) { box.lock.withLock { box.states.contains { if case .offline = $0 { return true } else { return false } } } })

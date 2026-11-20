@@ -54,10 +54,53 @@ if let i = args.firstIndex(of: "--smoke") {
                 if turn < texts.count {
                     firstSay = nil; sentAt = Date()
                     print("> \(texts[turn])")
+                    if texts[turn] == "<<handoff>>" {      // Open in Terminal (not actually opened in smoke mode)
+                        link.send(CoreMessage("open_session", ["where": "terminal"]))
+                    } else {
+                        link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
+                    }
+                } else { done.signal() }
+            }
+        case "open_terminal":
+            print("open_terminal in \(m.string("cwd") ?? "?"): resume \(m.string("session_id") ?? "?")")
+        case "session_state":
+            print("session_state: \(m.string("session_id") ?? "?") handed_off=\(m["handed_off"] ?? "") forked=\(m["forked"] ?? false)")
+            if (m["handed_off"] as? Bool) == true {   // move on to the next scripted line
+                turn += 1
+                if turn < texts.count {
+                    sentAt = Date(); print("> \(texts[turn])")
                     link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
                 } else { done.signal() }
             }
         case "state": print("assistant: \(m.string("value") ?? "?")")
+        case "pending_input":
+            // ZOE_SMOKE_ANSWER=approve|deny answers approval cards by "click" (end-to-end gate tests); else deny.
+            let id = m.string("id") ?? ""
+            if m.string("kind") == "terminal" {
+                let c = m["card"] as? [String: Any]
+                print("terminal card: \(c?["title"] as? String ?? "?") — \(c?["command"] as? String ?? "?")")
+                link.resolveLocally(id)
+                return
+            }
+            if m.string("kind") == "question", let qs = m["questions"] as? [[String: Any]] {
+                // Questions: pick each one's first option.
+                var answers: [String: String] = [:]
+                for q in qs {
+                    let first = ((q["options"] as? [[String: Any]])?.first?["label"] as? String) ?? "yes"
+                    if let text = q["question"] as? String { answers[text] = first }
+                }
+                print("question asked: \(qs.count) question(s) → first option(s): \(answers.values.sorted().joined(separator: ", "))")
+                link.answer(pendingID: id, value: answers, via: "click")
+                return
+            }
+            let value = ProcessInfo.processInfo.environment["ZOE_SMOKE_ANSWER"] == "approve" ? "approve" : "deny"
+            let card = m["card"] as? [String: Any]
+            let fields = (card?["fields"] as? [[String: Any]] ?? []).compactMap { f -> String? in
+                guard let l = f["label"] as? String, ["To", "Site", "Command"].contains(l) else { return nil }
+                return "\(l): \(f["value"] as? String ?? "")"
+            }
+            print("approval asked: \(card?["title"] as? String ?? "?") [\(fields.joined(separator: "; "))] → \(value)")
+            link.answer(pendingID: id, value: value, via: "click")
         case "error": print("core error: \(m.string("message") ?? "?")")
         default: break
         }
@@ -181,6 +224,21 @@ if args.contains("--ui-demo") {
             schedule once the cluster has room.
             """, summarised: true)
             await phase("card", 4, level: true)
+            bubble.showYou("Tell the team the build is green.")
+            if let a = ApprovalCard(message: ["id": "demo-1", "voice_ok": true, "card": [
+                "title": "Send a Slack message?",
+                "fields": [["label": "To", "value": "#team-builds", "mono": false],
+                           ["label": "Message", "value": "The build is green again: the flaky test is fixed.", "mono": false]],
+                "why": "Sends a message as you."] as [String: Any]]) { bubble.showApproval(a) }
+            if let b = ApprovalCard(message: ["id": "demo-2", "voice_ok": false, "card": [
+                "title": "Run a command?", "fields": [["label": "Command", "value": "git push origin main", "mono": true]],
+                "why": "Runs a command: needs a click."] as [String: Any]]) { bubble.showApproval(b) }
+            ch.state = .thinking
+            ch.waiting = 2
+            await phase("approval", 4)
+            bubble.removeApproval("demo-1"); ch.waiting = 1
+            await phase("approval2", 3)
+            bubble.removeApproval("demo-2"); ch.waiting = 0
             ch.state = .offline; bubble.hide(); await phase("offline", 2)
             ch.state = .idle; await phase("idle-after", 6)
             var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
@@ -249,6 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let character = CharacterWindow()
     private lazy var bubble = BubbleWindow(anchor: character.panel)
     private let characterItem = NSMenuItem(title: "Hide Character", action: #selector(toggleCharacter), keyEquivalent: "h")
+    private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
+    private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
+    private var handedOff = false
     private var coreOffline = false
     private var voiceState: TurnMachine.UIState = .idle
 
@@ -263,6 +324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(characterItem)
+        menu.addItem(terminalItem)
+        menu.addItem(takeBackItem)
+        menu.autoenablesItems = false
+        takeBackItem.isEnabled = false
         menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
@@ -271,13 +336,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startLink()
         voice.onStatus = { [weak self] s in self?.voiceItem.title = "Voice: \(s)"; print("voice: \(s)") }
-        character.onClick = { [weak self] in self?.voice.click() }
+        character.onClick = { [weak self] in
+            guard let self else { return }
+            // Something waits but its card isn't on screen: bring it back instead of starting to listen (#21).
+            if self.bubble.waiting > 0 && !self.bubble.isVisible { self.bubble.relayout(); return }
+            self.voice.click()
+        }
+        bubble.onWaitingChanged = { [weak self] n in self?.character.waiting = n }
         character.onMove = { [weak self] in self?.bubble.relayout() }
         character.show()
         voice.onMicLevel = { [weak self] v in self?.character.level(v) }
         voice.speaker.onLevel = { [weak self] v in self?.character.level(v) }
         voice.onReplyDone = { [weak self] in self?.bubble.replyDone() }
         voice.onCaption = { [weak self] t in self?.bubble.showCaption(t) }
+        bubble.onAnswer = { [weak self] id, approved in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: approved ? "approve" : "deny", via: "click")
+            self.bubble.removeApproval(id)
+            self.voice.approvalClosed(id: id)
+            print("[metrics] approval \(approved ? "approved" : "denied") by click")
+        }
+        bubble.onQuestionAnswered = { [weak self] id, answers in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: answers, via: "click")
+            self.voice.approvalClosed(id: id)
+        }
+        voice.onQuestionAnswer = { [weak self] id, question, value in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: [question: value], via: "voice")
+            self.bubble.removeQuestion(id)
+            self.voice.approvalClosed(id: id)
+            self.voice.speak("Okay.")
+        }
+        bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
+        bubble.onRunInTerminal = { [weak self] card in
+            guard let self, let t = card.terminal else { return }
+            self.link.answer(pendingID: card.id, value: "deny", via: "terminal")   // Zoe doesn't run it
+            self.bubble.removeApproval(card.id)
+            self.voice.approvalClosed(id: card.id)
+            self.openInTerminal(command: t.command, cwd: t.cwd)
+        }
+        bubble.onTerminalDone = { [weak self] card, open in
+            guard let self else { return }
+            self.link.resolveLocally(card.id)
+            if open { self.openInTerminal(command: card.command, cwd: card.cwd) }
+        }
+        voice.onApprovalAnswer = { [weak self] id, approved in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: approved ? "approve" : "deny", via: "voice")
+            self.bubble.removeApproval(id)
+            self.voice.approvalClosed(id: id)
+            self.voice.speak(approved ? "Okay." : "Okay, I won't.")
+        }
         voice.onUIState = { [weak self] st in
             guard let self else { return }
             self.voiceState = st
@@ -309,6 +419,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func startConversation() { voice.click() }
 
+    /// Runs a command in a new Terminal window, in its folder (#19, #20).
+    func openInTerminal(command: String, cwd: String) {
+        do {
+            let url = try TerminalScript.write(command: command, cwd: cwd)
+            let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            // Zoe never takes focus, so macOS won't let it bring another app forward unless it hands focus over:
+            // become active for a moment, yield to Terminal, and ask Terminal forward once it has the window.
+            NSApp.activate()
+            NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.Terminal")
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: cfg) { app, error in
+                if let error { print("couldn't open Terminal: \(error)"); return }
+                DispatchQueue.main.async { _ = app?.activate(from: .current, options: []) }
+            }
+            print("[metrics] opened in Terminal")
+        } catch {
+            print("couldn't open Terminal: \(error)")
+        }
+    }
+
+    /// Hands the conversation to Terminal (`claude --resume`), so Zoe stops writing to it (#20).
+    @objc private func openConversationInTerminal() {
+        link.send(CoreMessage("open_session", ["where": "terminal"]))
+    }
+
+    /// Talk to Zoe again about the handed-off conversation: the core forks it.
+    @objc private func takeBack() {
+        link.send(CoreMessage("take_back"))
+        takeBackItem.isEnabled = false
+    }
+
     @objc private func toggleCharacter() {
         if character.isVisible { character.hide(); bubble.hide(); characterItem.title = "Show Character" }
         else { character.show(); characterItem.title = "Hide Character" }
@@ -330,7 +472,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         link.onLog = { FileHandle.standardError.write(Data($0.utf8)) }
         link.onState = { [weak self] s in MainActor.assumeIsolated { self?.show(s) } }
         link.onMessage = { [weak self] m in MainActor.assumeIsolated { self?.handle(m) } }
-        link.onPendingDenied = { ids in print("core restarted: denied \(ids.count) pending approval(s)") }
+        link.onPendingDenied = { [weak self] ids in
+            MainActor.assumeIsolated {
+                for id in ids { self?.bubble.removeApproval(id); self?.bubble.removeQuestion(id); self?.voice.approvalClosed(id: id) }
+            }
+            print("core restarted: denied \(ids.count) pending approval(s)")
+        }
         link.start()
     }
 
@@ -352,6 +499,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let id = m.string("utterance_id"), id == dropped { return }
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
+        case "open_terminal":
+            if let cmd = m.string("command") {
+                openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
+                voice.endConversation()
+            }
+        case "session_state":
+            handedOff = (m["handed_off"] as? Bool) == true
+            takeBackItem.isEnabled = handedOff
+            if (m["forked"] as? Bool) == true { print("[metrics] handed-off conversation forked") }
+        case "pending_input" where m.string("kind") == "terminal":
+            guard let t = TerminalCard(message: m.fields) else { return }
+            bubble.showTerminal(t)
+            NSSound(named: "Glass")?.play()
+        case "pending_input" where m.string("kind") == "question":
+            guard let q = QuestionCard(message: m.fields) else { return }
+            bubble.showQuestion(q)
+            NSSound(named: "Glass")?.play()
+            let first = q.questions[0]
+            voice.questionAsked(id: q.id, question: first.text, labels: first.options.map(\.label), multi: first.multi,
+                                voiceOK: q.questions.count == 1)
+        case "pending_input":
+            guard m.string("kind") == "approval", let card = ApprovalCard(message: m.fields) else { return }
+            bubble.showApproval(card)
+            NSSound(named: "Glass")?.play()           // something needs me
+            let summary = (m["card"] as? [String: Any])?["summary"] as? String ?? card.title
+            voice.approvalAsked(id: card.id, summary: summary, voiceOK: card.voiceOK)
+        case "dismiss_panel":
+            if let id = m.string("id") { bubble.removeApproval(id); bubble.removeQuestion(id); bubble.removeTerminal(id); voice.approvalClosed(id: id) }
         case "bubble":
             if let id = m.string("utterance_id"), id == dropped { return }
             bubble.showFullReply(m.string("text") ?? "", summarised: (m["summarised"] as? Bool) == true)

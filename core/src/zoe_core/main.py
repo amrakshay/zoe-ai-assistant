@@ -39,6 +39,14 @@ class Core:
             await self.send("pong", id=msg.get("id"), uptime_s=round(time.monotonic() - self.started, 3))
         elif t == "utterance":
             await self.handle_utterance(msg)
+        elif t == "open_session":
+            await self.open_session(msg)
+        elif t == "take_back":
+            if self.brain:
+                self.brain.take_back()
+        elif t == "answer":
+            if not (self.brain and self.brain.approvals.answer(msg)):
+                await self.send("error", message=f"answer for unknown or finished request: {msg.get('pending_id')}")
         elif t == "user_interrupted":
             if self.brain:
                 await self.brain.interrupt()
@@ -51,6 +59,18 @@ class Core:
         else:
             await self.send("error", message=f"unknown message type: {t}")
         return True
+
+    async def open_session(self, msg: dict[str, Any]) -> None:
+        """`open_session {where: terminal}` (#20): hand the conversation to Terminal."""
+        if msg.get("where", "terminal") != "terminal":
+            await self.send("error", message="only Terminal is supported for now")
+            return
+        info = await self.brain.hand_off() if self.brain else None
+        if info is None:
+            await self.send("error", message="no conversation to open yet")
+            return
+        await self.send("open_terminal", command=info["command"], cwd=info["cwd"], session_id=info["session_id"])
+        await self.send("session_state", session_id=info["session_id"], handed_off=True)
 
     async def handle_utterance(self, msg: dict[str, Any]) -> None:
         text = str(msg.get("text", ""))

@@ -31,6 +31,13 @@ final class VoiceController {
     private func metric(_ what: String) {
         print(String(format: "[metrics] turn %d: end of turn → %@ %.0f ms", turnNo, what, (Self.now() - turnEndAt) * 1000))
     }
+    // Voice approvals (#17): one card at a time, oldest first.
+    private struct VoiceApproval { let id: String; let summary: String; let voiceOK: Bool; var retried = false }
+    private var approvalQueue: [VoiceApproval] = []
+    private var answering: (id: String, promptEnd: TimeInterval)?
+    private var answerSpeechStart: TimeInterval?
+    /// A spoken answer to an approval card: (pending id, approved).
+    var onApprovalAnswer: ((String, Bool) -> Void)?
     private var unloadTask: Task<Void, Never>?
     /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
     var unloadAfter: Duration = .seconds(120)
@@ -56,9 +63,11 @@ final class VoiceController {
             let l = Listener(vad: vad)
             l.onSpeech = { e in
                 Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if self.answering != nil { self.answerSpeech(e); return }   // a yes/no, not a new turn
                     switch e {
-                    case .start: self?.handle(.speechStart(Self.now()))
-                    case .end: self?.handle(.speechEnd(Self.now()))
+                    case .start: self.handle(.speechStart(Self.now()))
+                    case .end: self.handle(.speechEnd(Self.now()))
                     }
                 }
             }
@@ -158,6 +167,87 @@ final class VoiceController {
     }
 
     func endConversation() { handle(.endConversationRequested(Self.now())) }
+
+    // MARK: voice approvals (#17)
+
+    /// The core asked for approval. Zoe speaks the card's summary; if voice is allowed and the mic is on, it then
+    /// listens for one answer that starts after the prompt has finished.
+    func approvalAsked(id: String, summary: String, voiceOK: Bool) {
+        guard !approvalQueue.contains(where: { $0.id == id }) else { return }
+        approvalQueue.append(VoiceApproval(id: id, summary: summary, voiceOK: voiceOK))
+        if approvalQueue.count == 1 { promptNext() }
+    }
+
+    /// Answered by click, timed out, withdrawn, or answered by voice: forget it and move to the next one.
+    func approvalClosed(id: String) {
+        let wasFirst = approvalQueue.first?.id == id
+        approvalQueue.removeAll { $0.id == id }
+        if answering?.id == id { stopAnswering() }
+        if wasFirst { promptNext() }
+    }
+
+    private var canListen: Bool { audio.isRunning && listener != nil }
+
+    private func promptNext() {
+        guard let a = approvalQueue.first else { return }
+        let listen = a.voiceOK && canListen
+        let tail = !a.voiceOK ? "This one needs a click." : listen ? "Say yes or no." : "Approve it on screen."
+        speaker.enqueue("\(a.summary) \(tail)", onPlayed: { [weak self] in
+            guard let self, listen, self.approvalQueue.first?.id == a.id else { return }
+            self.startAnswering(a.id)
+        })
+    }
+
+    private func startAnswering(_ id: String) {
+        answering = (id, Self.now())
+        answerSpeechStart = nil
+        audio.samplesQueue.async { [listener] in listener?.begin() }       // nothing heard before this counts
+        onUIState?(.listening)
+    }
+
+    private func stopAnswering() {
+        answering = nil
+        answerSpeechStart = nil
+        audio.samplesQueue.async { [listener] in listener?.pause() }
+        if machine.phase != .idle { onUIState?(.thinking) }
+    }
+
+    private func answerSpeech(_ e: SpeechSegmenter.Event) {
+        guard let (id, promptEnd) = answering else { return }
+        switch e {
+        case .start:
+            answerSpeechStart = Self.now()
+        case .end:
+            let started = answerSpeechStart ?? 0
+            audio.samplesQueue.async { [listener, weak self] in
+                guard let samples = listener?.takeTurn() else { return }
+                listener?.pause()
+                Task { @MainActor in
+                    guard let self, self.answering?.id == id else { return }
+                    let text = (try? await self.stt.transcribe(samples))?.text ?? ""
+                    let answer = VoiceAnswer.accepted(speechStart: started, promptEnd: promptEnd) ? VoiceAnswer.classify(text) : .unclear
+                    print("[metrics] approval answer by voice: \(answer)")
+                    switch answer {
+                    case .yes, .no:
+                        self.answering = nil
+                        self.onApprovalAnswer?(id, answer == .yes)
+                    case .unclear:
+                        if let i = self.approvalQueue.firstIndex(where: { $0.id == id }), !self.approvalQueue[i].retried {
+                            self.approvalQueue[i].retried = true
+                            self.answering = nil
+                            self.speaker.enqueue("Sorry, was that a yes or a no?", onPlayed: { [weak self] in
+                                guard let self, self.approvalQueue.first?.id == id else { return }
+                                self.startAnswering(id)
+                            })
+                        } else {
+                            self.stopAnswering()
+                            self.speaker.enqueue("I'll wait for a click.")
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private func handle(_ e: TurnMachine.Event) {
         for action in machine.handle(e) { perform(action) }

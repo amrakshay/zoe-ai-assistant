@@ -303,7 +303,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.link.answer(pendingID: id, value: approved ? "approve" : "deny", via: "click")
             self.bubble.removeApproval(id)
+            self.voice.approvalClosed(id: id)
             print("[metrics] approval \(approved ? "approved" : "denied") by click")
+        }
+        voice.onApprovalAnswer = { [weak self] id, approved in
+            guard let self else { return }
+            self.link.answer(pendingID: id, value: approved ? "approve" : "deny", via: "voice")
+            self.bubble.removeApproval(id)
+            self.voice.approvalClosed(id: id)
+            self.voice.speak(approved ? "Okay." : "Okay, I won't.")
         }
         voice.onUIState = { [weak self] st in
             guard let self else { return }
@@ -358,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         link.onState = { [weak self] s in MainActor.assumeIsolated { self?.show(s) } }
         link.onMessage = { [weak self] m in MainActor.assumeIsolated { self?.handle(m) } }
         link.onPendingDenied = { [weak self] ids in
-            MainActor.assumeIsolated { for id in ids { self?.bubble.removeApproval(id) } }
+            MainActor.assumeIsolated { for id in ids { self?.bubble.removeApproval(id); self?.voice.approvalClosed(id: id) } }
             print("core restarted: denied \(ids.count) pending approval(s)")
         }
         link.start()
@@ -385,9 +393,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "pending_input":
             guard m.string("kind") == "approval", let card = ApprovalCard(message: m.fields) else { return }
             bubble.showApproval(card)
-            NSSound(named: "Glass")?.play()           // something needs me; voice approvals come in #17
+            NSSound(named: "Glass")?.play()           // something needs me
+            let summary = (m["card"] as? [String: Any])?["summary"] as? String ?? card.title
+            voice.approvalAsked(id: card.id, summary: summary, voiceOK: card.voiceOK)
         case "dismiss_panel":
-            if let id = m.string("id") { bubble.removeApproval(id) }
+            if let id = m.string("id") { bubble.removeApproval(id); voice.approvalClosed(id: id) }
         case "bubble":
             if let id = m.string("utterance_id"), id == dropped { return }
             bubble.showFullReply(m.string("text") ?? "", summarised: (m["summarised"] as? Bool) == true)

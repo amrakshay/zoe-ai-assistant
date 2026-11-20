@@ -156,6 +156,21 @@ do {
     }
 }
 
+// MARK: voice answers to approval cards (#17)
+print("Voice answers")
+do {
+    let yes = ["Yes", "yes.", "Yeah, go ahead", "Sure", "OK", "okay do it", "Send it", "Sounds good!", "Approve"]
+    let no = ["No", "nope", "Cancel that", "Don't", "Yes, cancel it", "wait", "no, don't send it", "Okay no"]
+    let unclear = ["", "Hmm", "maybe", "What does it say?", "yes please send it to the whole company right now",
+                   "Change the message first"]
+    check("yes answers", yes.allSatisfy { VoiceAnswer.classify($0) == .yes }, "\(yes.filter { VoiceAnswer.classify($0) != .yes })")
+    check("no answers, and a no anywhere wins", no.allSatisfy { VoiceAnswer.classify($0) == .no }, "\(no.filter { VoiceAnswer.classify($0) != .no })")
+    check("anything else is unclear", unclear.allSatisfy { VoiceAnswer.classify($0) == .unclear }, "\(unclear.filter { VoiceAnswer.classify($0) != .unclear })")
+    check("speech that began during the prompt doesn't count", !VoiceAnswer.accepted(speechStart: 9.95, promptEnd: 10))
+    check("…nor within the echo tail", !VoiceAnswer.accepted(speechStart: 10.05, promptEnd: 10))
+    check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
+}
+
 // MARK: supervision with a fake core
 print("Core link supervision")
 let fakeCore = """

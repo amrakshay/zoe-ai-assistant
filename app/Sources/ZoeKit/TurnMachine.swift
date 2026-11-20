@@ -40,6 +40,7 @@ public struct TurnMachine: Sendable {
         case setState(UIState)
         case refuse(String)     // e.g. "in a call"
         case interruptReply     // stop speaking and tell the core (a key press or click during a reply)
+        case stopSpeaking       // a call started: stop any speech at once (#38)
     }
 
     public enum Chime: Sendable, Equatable { case start, end }
@@ -65,7 +66,7 @@ public struct TurnMachine: Sendable {
             inCall = true
             let was = phase
             phase = .idle; keyDownAt = nil
-            return (was == .idle ? [] : [.discardTurn, .stopEngine]) + [.setState(.inCall)]
+            return (was == .idle ? [] : [.discardTurn, .stopEngine]) + [.stopSpeaking, .setState(.inCall)]
         case .callEnded:
             inCall = false
             return [.setState(.idle)]

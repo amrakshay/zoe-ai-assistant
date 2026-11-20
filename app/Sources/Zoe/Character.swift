@@ -82,6 +82,7 @@ final class OrbView: NSView {
     private let badgeText = CATextLayer()
     private let hand = CATextLayer()
     private let muted = CATextLayer()
+    private let phones = CATextLayer()
     private var state: CharacterWindow.State = .idle
     private var smoothed: Float = 0
     private var dragStart: NSPoint?
@@ -148,7 +149,9 @@ final class OrbView: NSView {
         hand.frame = CGRect(x: r.minX - 12, y: r.maxY - 14, width: 26, height: 26)
         muted.string = "🔇"; muted.fontSize = 15; muted.contentsScale = 2
         muted.frame = CGRect(x: r.minX - 10, y: r.minY - 6, width: 24, height: 24)
-        for l in [badge, hand, muted] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
+        phones.string = "🎧"; phones.fontSize = 22; phones.contentsScale = 2; phones.alignmentMode = .center
+        phones.frame = CGRect(x: r.midX - 16, y: r.maxY - 12, width: 32, height: 30)
+        for l in [badge, hand, muted, phones] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
 
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
         apply(.idle)
@@ -192,6 +195,7 @@ final class OrbView: NSView {
         halo.strokeColor = accent
         arc.strokeColor = accent
         halo.opacity = s == .listening ? 0.8 : 0
+        phones.opacity = s == .inCall ? 1 : 0          // in a call (#38)
         arc.opacity = s == .thinking ? 1 : 0
         body.setAffineTransform(.identity)
         halo.setAffineTransform(.identity)

@@ -102,3 +102,10 @@ def test_brain_keeps_at_most_max_live_processes():
     asyncio.run(b.close_extra())
     live = [s for s in b.sessions if s.client is not None]
     assert len(live) <= MAX_LIVE and b.active.client is not None and clients[0].closed
+
+
+def test_a_new_route_reuses_the_unused_session_started_at_launch():
+    b = Brain(Wire())
+    warm = b.active                                  # pre-connected at hello, never used
+    asyncio.run(b.choose("what's the capital of Portugal?"))
+    assert b.active is warm and len(b.sessions) == 1

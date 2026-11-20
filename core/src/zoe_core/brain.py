@@ -90,6 +90,8 @@ class Session:
         self.client = None
         self._connecting: asyncio.Task | None = None
         self.last_used = 0.0
+        self.turns: list[tuple[str, str]] = []     # (what I said, Zoe's reply), in memory only, for the summary (#28)
+        self.summarised_turns = 0
         # Handoff (#20): once opened in Terminal, Zoe never writes to it again; the next turn forks it.
         self.handed_off: str | None = None
         self.fork_next = False
@@ -143,8 +145,13 @@ class Brain:
         if target is None and r.action == "continue":
             target = self.active
         if target is None:
+            # A session in that folder that was started (pre-connected at launch) but never used: use it.
+            target = next((s for s in self.sessions if s.cwd == r.cwd and s.session_id is None and not s.turns), None)
+        if target is None:
             target = self.new_session(r.cwd)
         switched = target is not self.active
+        if switched:
+            self.summarise_soon(self.active)          # leaving a session: title and summary in the background
         self.active = target
         log(f"route: {r.action} in {r.cwd} ({r.reason})")
         if switched or r.action == "new":
@@ -153,11 +160,34 @@ class Brain:
                             handed_off=bool(target.handed_off))
         await self.close_extra()
 
+    def summarise_soon(self, s: Session) -> None:
+        """Title and one-line summary of a session's new turns, by Haiku, in the background (#28)."""
+        if self.index is None or not s.session_id or len(s.turns) <= s.summarised_turns:
+            return
+        s.summarised_turns = len(s.turns)
+        turns = s.turns[-8:]
+        asyncio.create_task(self._summarise(s.session_id, s.cwd, turns))
+
+    async def _summarise(self, session_id: str, cwd: str, turns: list[tuple[str, str]]) -> None:
+        from .quick import ask_json
+        convo = "\n".join(f"User: {u[:300]}\nZoe: {r[:300]}" for u, r in turns)
+        res, dt = await ask_json(
+            "You label voice-assistant conversations so they can be found later. Reply with JSON only: "
+            '{"title": "<at most 6 words>", "summary": "<one sentence, at most 20 words>"}',
+            f"Folder: {cwd}\n\n{convo}")
+        if res and self.index is not None:
+            if isinstance(res.get("title"), str) and res["title"].strip():
+                self.index.set_title(session_id, res["title"])
+            if isinstance(res.get("summary"), str) and res["summary"].strip():
+                self.index.set_summary(session_id, res["summary"])
+        log(f"summary for {session_id[:8]} in {dt:.1f} s: {'ok' if res else 'failed'}")
+
     async def close_extra(self) -> None:
         """Keep at most MAX_LIVE Claude Code processes; the rest close and resume by id later."""
         live = sorted((s for s in self.sessions if s.client is not None and s is not self.active),
                       key=lambda s: s.last_used, reverse=True)
         for s in live[MAX_LIVE - 1:]:
+            self.summarise_soon(s)
             try:
                 await s.client.disconnect()
             except Exception:  # noqa: BLE001
@@ -185,6 +215,7 @@ class Brain:
             except Exception:  # noqa: BLE001
                 pass
         self.client, self._connecting = None, None
+        self.summarise_soon(self.active)
         self.handed_off, self.fork_next = sid, True
         if self.index is not None:
             self.index.set_status(sid, "handed_off")
@@ -350,6 +381,8 @@ class Brain:
                     if self.index is not None:
                         self.index.upsert_session(m.session_id, self.cwd, status="idle", forked_from=forked_from)
                         self.index.touch(m.session_id)
+                        if not (self.index.session(m.session_id) or {}).get("title"):
+                            self.index.set_title(m.session_id, text[:60])     # until the summary gives a better one
                     if self.fork_next and m.session_id != self.handed_off:
                         log(f"forked {str(self.handed_off)[:8]} → {m.session_id[:8]}")
                         self.fork_next, self.handed_off = False, None
@@ -362,6 +395,7 @@ class Brain:
                 await self.send("say", utterance_id=uid, text=line, final=False)
             reply = "".join(full).strip()
             self.last_reply = reply
+            self.active.turns.append((text, reply))
             await self.send("say", utterance_id=uid, text="", final=True)
             await self.send("bubble", utterance_id=uid, text=reply, summarised=spoken.held_back)
             log(f"turn: first sentence {first if first is None else round(first, 2)} s, total {time.monotonic() - t0:.2f} s")
@@ -382,6 +416,11 @@ class Brain:
 
     async def close(self) -> None:
         await self.interrupt()
+        for s in self.sessions:
+            self.summarise_soon(s)
+        pending = [t for t in asyncio.all_tasks() if t.get_coro().__qualname__.endswith("_summarise")]
+        if pending:
+            await asyncio.wait(pending, timeout=8)        # let summaries land before the core exits
         for s in self.sessions:
             if s.client:
                 try:

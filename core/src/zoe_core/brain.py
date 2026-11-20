@@ -23,6 +23,7 @@ from .approvals import Approvals
 from .names import Names
 from .renderers import render
 from .terminal import TerminalHandoff
+from .ui import UI
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
 from .router import SessionInfo, route
@@ -52,6 +53,8 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
 - The user's words come from speech-to-text, which can mishear short technical words ("ls" as "is"). If a
   request to run, change or send something is unclear or doesn't quite make sense, say what you understood in
   one sentence and ask before doing anything; don't go exploring to guess.
+- For more than about three items, tables, code or links, draw instead of talking: mcp__ui__show_table or
+  mcp__ui__show_card, then say one short sentence. Offer choices with mcp__ui__show_choices.
 - Before sending to a Slack user or channel by ID, look it up first (slack_read_user_profile with its user_id,
   or slack_search_channels), so the approval card can show its name.
 """.strip()
@@ -120,6 +123,8 @@ class Brain:
         self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id,
                                    index=index)
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
+        self.ui = UI(send, session_id=lambda: self.session_id)
+        self._ui_server = None
         self.sessions: list[Session] = []
         self.active = self.new_session(home())
         self._sweeper: asyncio.Task | None = None
@@ -371,10 +376,16 @@ class Brain:
                    "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
                    "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
             can_use_tool=can_use_tool,
+            mcp_servers={"ui": self.ui_server()},
             include_partial_messages=True,
             resume=s.session_id,
             fork_session=bool(s.fork_next and s.session_id),
         )
+
+    def ui_server(self):
+        if self._ui_server is None:
+            self._ui_server = self.ui.server()
+        return self._ui_server
 
     async def load_projects(self) -> None:
         """Seed projects from Claude Code's session folders (file reads in a thread; index writes here)."""

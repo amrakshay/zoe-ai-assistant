@@ -70,6 +70,10 @@ if let i = args.firstIndex(of: "--smoke") {
                     }
                 } else { done.signal() }
             }
+        case "show_panel":
+            let p = m["payload"] as? [String: Any]
+            let rows = (p?["rows"] as? [Any])?.count
+            print("panel: \(m.string("kind") ?? "?") \"\(p?["title"] as? String ?? p?["prompt"] as? String ?? "")\"\(rows.map { " — \($0) rows" } ?? "")")
         case "open_terminal":
             print("open_terminal in \(m.string("cwd") ?? "?"): resume \(m.string("session_id") ?? "?")")
         case "session_state":

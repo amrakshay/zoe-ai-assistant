@@ -71,11 +71,11 @@ class Gate:
         d: Decision = self.taint.adjust(str(name), tool_input, decide(name, tool_input))
         sid = self._session()
         if d.policy is Policy.ALLOW:
-            actions.log_decision(str(name), tool_input, "allow", "policy", d.reason, sid)
+            actions.log_decision(str(name), tool_input, "allow", "policy", d.reason, sid, self.taint.tainted)
             self.taint.observe(str(name))           # its result enters Claude's context
             return _out("allow", d.reason)
         if d.policy is Policy.DENY:
-            actions.log_decision(str(name), tool_input, "deny", "policy", d.reason, sid)
+            actions.log_decision(str(name), tool_input, "deny", "policy", d.reason, sid, self.taint.tainted)
             return _out("deny", f"Blocked: {d.reason}.")
         if self.approver is None:
             actions.log_decision(str(name), tool_input, "deny", "no-approver", d.reason, sid)
@@ -87,7 +87,8 @@ class Gate:
             ans = Answer(False, "error")
         if d.policy is Policy.CLICK and ans.approved and ans.via != "click":
             ans = Answer(False, ans.via)          # a click-only tool approved any other way is still a deny
-        actions.log_decision(str(name), tool_input, "allow" if ans.approved else "deny", ans.via, d.reason, sid)
+        actions.log_decision(str(name), tool_input, "allow" if ans.approved else "deny", ans.via, d.reason, sid,
+                             self.taint.tainted)
         if ans.approved:
             self.taint.observe(str(name))
             return _out("allow", f"approved by the user ({ans.via})")

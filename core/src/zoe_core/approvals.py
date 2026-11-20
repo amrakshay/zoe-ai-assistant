@@ -44,7 +44,8 @@ def basic_card(req: ApprovalRequest) -> dict:
 
 class Approvals:
     def __init__(self, send: Send, render: Render = basic_card, timeout: float | None = None,
-                 session_id: Callable[[], str | None] | None = None):
+                 session_id: Callable[[], str | None] | None = None, index=None):
+        self.index = index            # the session index (#24): records what waits and how it was answered
         self.send = send
         self.render = render
         self.timeout = default_timeout() if timeout is None else timeout
@@ -62,6 +63,10 @@ class Approvals:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[pid] = fut
         await self.send("pending_input", id=pid, session_id=self._session(), timeout_s=timeout, **fields)
+        if self.index is not None:
+            title = (fields.get("card") or {}).get("title") if isinstance(fields.get("card"), dict) else None
+            self.index.add_pending(pid, self._session(), fields.get("kind", "?"), fields.get("tool"),
+                                   title or fields.get("kind"), bool(fields.get("voice_ok")))
         try:
             value, via = await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
@@ -72,6 +77,9 @@ class Approvals:
             self._pending.pop(pid, None)
         if via in ("timeout", "interrupt"):
             await self.send("dismiss_panel", id=pid, reason=via)
+        if self.index is not None:
+            summary = value if isinstance(value, str) else ("answered" if value is not None else "none")
+            self.index.answer_pending(pid, summary, via)
         return value, via
 
     async def ask(self, req: ApprovalRequest) -> Answer:

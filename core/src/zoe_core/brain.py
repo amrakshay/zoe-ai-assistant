@@ -69,7 +69,8 @@ def resume_command(session_id: str) -> str:
 
 
 class Brain:
-    def __init__(self, send: Send) -> None:
+    def __init__(self, send: Send, index=None) -> None:
+        self.index = index        # the session index (#24); None in tests
         self.send = send
         self.client = None
         self.session_id: str | None = None
@@ -77,7 +78,8 @@ class Brain:
         self._connecting: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
         self.names = Names()
-        self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id)
+        self.approvals = Approvals(send, render=lambda req: render(req, self.names), session_id=lambda: self.session_id,
+                                   index=index)
         self.gate = Gate(approver=self.approvals.ask, session_id=lambda: self.session_id)
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
         # Handoff (#20): once the session is opened in Terminal, Zoe never writes to it again; the next turn
@@ -108,6 +110,8 @@ class Brain:
                 pass
         self.client, self._connecting = None, None
         self.handed_off, self.fork_next = sid, True
+        if self.index is not None:
+            self.index.set_status(sid, "handed_off")
         log(f"handed off session {sid[:8]} to Terminal; the next turn forks it")
         return {"session_id": sid, "cwd": self.cwd, "command": resume_command(sid)}
 
@@ -223,6 +227,8 @@ class Brain:
                 await self.send("say", utterance_id=uid, text=s, final=False)
 
         await self.send("state", value="thinking")
+        if self.index is not None and self.session_id:
+            self.index.set_status(self.session_id, "running")
         try:
             await self.ready()
             await self.client.query(text)
@@ -249,6 +255,10 @@ class Brain:
                             got = splitter.flush()
                             await say(got, splitter.breaks)
                 elif isinstance(m, ResultMessage):
+                    forked_from = self.handed_off if (self.fork_next and m.session_id != self.handed_off) else None
+                    if self.index is not None:
+                        self.index.upsert_session(m.session_id, self.cwd, status="idle", forked_from=forked_from)
+                        self.index.touch(m.session_id)
                     if self.fork_next and m.session_id != self.handed_off:
                         log(f"forked {str(self.handed_off)[:8]} → {m.session_id[:8]}")
                         self.fork_next, self.handed_off = False, None

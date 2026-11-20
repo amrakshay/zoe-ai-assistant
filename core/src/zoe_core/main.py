@@ -89,8 +89,16 @@ async def serve(reader: asyncio.StreamReader, write: Callable[[bytes], Awaitable
 
     b = None
     if brain:
+        from . import actions
         from .brain import Brain
-        b = Brain(send)
+        from .index import Index
+        try:
+            index = Index()
+            actions.use_index(index)
+        except Exception as e:  # noqa: BLE001 — Zoe still works without its index
+            log("session index unavailable:", repr(e))
+            index = None
+        b = Brain(send, index=index)
     core = Core(send, b)
     while True:
         try:

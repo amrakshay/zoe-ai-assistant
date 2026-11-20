@@ -15,7 +15,7 @@ Releases are automated, as in [maclens](https://github.com/amrakshay/maclens/blo
    - If you'd rather not approve every time, give release-please a fine-grained personal access token (Contents + Pull requests: read/write on this repo) as the `token:` input.
    - If the release PR ever shows conflicts, delete its branch `release-please--branches--main`. The next push to `main` regenerates it.
 
-The version starts at `0.0.0`; the first `feat:` merged after setup produces `0.1.0`.
+The version starts at `0.0.0`. The first release is `0.1.0`, because `release-please-config.json` sets `"initial-version": "0.1.0"`: with no earlier release tag, release-please otherwise releases its default first version, `1.0.0`, whatever the commits say.
 
 ## One-time setup
 

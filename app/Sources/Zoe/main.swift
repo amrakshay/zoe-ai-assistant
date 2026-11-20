@@ -70,6 +70,10 @@ if let i = args.firstIndex(of: "--smoke") {
                     }
                 } else { done.signal() }
             }
+        case "show_panel":
+            let p = m["payload"] as? [String: Any]
+            let rows = (p?["rows"] as? [Any])?.count
+            print("panel: \(m.string("kind") ?? "?") \"\(p?["title"] as? String ?? p?["prompt"] as? String ?? "")\"\(rows.map { " — \($0) rows" } ?? "")")
         case "open_terminal":
             print("open_terminal in \(m.string("cwd") ?? "?"): resume \(m.string("session_id") ?? "?")")
         case "session_state":
@@ -249,6 +253,28 @@ if args.contains("--ui-demo") {
             bubble.removeApproval("demo-1"); ch.waiting = 1
             await phase("approval2", 3)
             bubble.removeApproval("demo-2"); ch.waiting = 0
+            bubble.hide(); bubble.openTyping(); ch.quiet = true
+            await phase("typing", 2)
+            let panels = PanelWindow(anchor: ch.panel)
+            if let t = PanelContent(message: ["id": "panel-t", "kind": "table", "payload": [
+                "title": "Calendar: next 7 days", "columns": ["When", "What", "Where"],
+                "rows": (0..<40).map { ["Mon \(9 + $0 % 8):00", "Meeting \($0 + 1)", $0 % 3 == 0 ? "Room A" : "Video"] },
+                "truncated_rows": 0] as [String: Any]]) { panels.show(t) }
+            await phase("panel-table", 3)
+            if let PanelShot = ProcessInfo.processInfo.environment["ZOE_DEMO_SHOTS"], let v = panels.panel.contentView,
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(PanelShot)/panel-table.png"))
+            }
+            if let c = PanelContent(message: ["id": "panel-c", "kind": "choices", "payload": [
+                "prompt": "Which meeting should I prepare notes for?", "options": ["Design review", "1:1", "Planning"]] as [String: Any]]) { panels.show(c) }
+            await phase("panel-choices", 2)
+            if let dir = ProcessInfo.processInfo.environment["ZOE_DEMO_SHOTS"], let v = panels.panel.contentView,
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/panel-choices.png"))
+            }
+            panels.close()
             ch.state = .offline; bubble.hide(); await phase("offline", 2)
             ch.state = .idle; await phase("idle-after", 6)
             var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
@@ -316,11 +342,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dropped: String?       // an interrupted reply: its remaining chunks are ignored
     private let character = CharacterWindow()
     private lazy var bubble = BubbleWindow(anchor: character.panel)
+    private lazy var panels = PanelWindow(anchor: character.panel)
     private let characterItem = NSMenuItem(title: "Hide Character", action: #selector(toggleCharacter), keyEquivalent: "h")
     private let terminalItem = NSMenuItem(title: "Open Conversation in Terminal", action: #selector(openConversationInTerminal), keyEquivalent: "o")
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
+    private let typeHotkey = Hotkey(kind: .typeShortcut)
     private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
+    private let quietItem = NSMenuItem(title: "Quiet Mode", action: #selector(toggleQuiet), keyEquivalent: "")
+    private static let quietKey = "quietMode"
     private var coreOffline = false
     private var voiceState: TurnMachine.UIState = .idle
 
@@ -335,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Start a Conversation", action: #selector(startConversation), keyEquivalent: "s"))
         menu.addItem(characterItem)
+        menu.addItem(quietItem)
         menu.addItem(recentItem)
         recentItem.submenu = NSMenu()
         recentItem.isEnabled = false
@@ -342,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(takeBackItem)
         menu.autoenablesItems = false
         takeBackItem.isEnabled = false
-        menu.addItem(NSMenuItem(title: "Send a Test Message…", action: #selector(sendTest), keyEquivalent: "t"))
+        menu.addItem(NSMenuItem(title: "Type to Zoe…  ⌃⌥T", action: #selector(typeToZoe), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Restart Core", action: #selector(restartCore), keyEquivalent: "r"))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Zoe", action: #selector(quit), keyEquivalent: "q"))
@@ -383,6 +414,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.speak("Okay.")
         }
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
+        panels.onChoice = { [weak self] choice in self?.sendTyped(choice, trigger: "click") }
+        bubble.onTyped = { [weak self] text in self?.sendTyped(text, trigger: "text") }
+        typeHotkey.onSignal = { sig in
+            if sig == .down { Task { @MainActor [weak self] in self?.typeToZoe() } }
+        }
+        if !typeHotkey.start() { print("⌃⌥T unavailable (taken by another app?)") }
         bubble.onRunInTerminal = { [weak self] card in
             guard let self, let t = card.terminal else { return }
             self.link.answer(pendingID: card.id, value: "deny", via: "terminal")   // Zoe doesn't run it
@@ -424,6 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice.turnSent()
         }
         voice.onListeningStarted = { [weak self] in self?.link.send(CoreMessage("listening")) }
+        setQuiet(UserDefaults.standard.bool(forKey: Self.quietKey))
         voice.onInterrupt = { [weak self] in
             guard let self, let id = self.current else { return }
             self.dropped = id            // ignore the rest of the interrupted reply
@@ -453,6 +491,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("couldn't open Terminal: \(error)")
         }
+    }
+
+    /// Quiet mode (#36): no speech at all, everything on screen; remembered across restarts.
+    private func setQuiet(_ on: Bool) {
+        voice.quiet = on
+        character.quiet = on
+        quietItem.state = on ? .on : .off
+        UserDefaults.standard.set(on, forKey: Self.quietKey)
+        link.send(CoreMessage("mute", ["on": on]))
+    }
+
+    @objc private func toggleQuiet() { setQuiet(!voice.quiet) }
+
+    /// A request that wasn't spoken (a typed line, a clicked choice): shown, then sent like an utterance.
+    func sendTyped(_ text: String, trigger: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        counter += 1
+        current = "u\(counter)"
+        bubble.showYou(t)
+        link.send(CoreMessage("utterance", ["id": current!, "text": t, "trigger": trigger]))
+        voice.turnSent()
     }
 
     /// Recent Sessions (#30): title, folder and age; Continue Here or Open in Terminal.
@@ -543,11 +603,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let id = m.string("utterance_id"), id == dropped { return }
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
+        case "show_panel":
+            if let p = PanelContent(message: m.fields) { panels.show(p) }
+        case "dismiss_panel" where (m.string("id") ?? "").hasPrefix("panel-"):
+            panels.dismiss(m.string("id") ?? "")
         case "open_terminal":
             if let cmd = m.string("command") {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "mode":
+            setQuiet(m.string("value") == "quiet")
         case "sessions_activity":
             updateRecent(m["list"] as? [[String: Any]] ?? [])
         case "session_state":
@@ -585,19 +651,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func sendTest() {
-        let alert = NSAlert()
-        alert.messageText = "Send a test message to the core"
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        field.stringValue = "Hello Zoe"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Send"); alert.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        counter += 1
-        current = "u\(counter)"
-        bubble.showYou(field.stringValue)
-        link.send(CoreMessage("utterance", ["id": current!, "text": field.stringValue, "trigger": "text"]))
+    /// Type to Zoe (#37): a text box in the bubble; Return sends it like a spoken request.
+    @objc private func typeToZoe() {
+        if !character.isVisible { character.show() }
+        bubble.openTyping()
     }
 
     @objc private func restartCore() { link.stop(); startLink() }

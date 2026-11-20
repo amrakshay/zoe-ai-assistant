@@ -12,8 +12,9 @@ struct BubbleContent: Equatable {
     var approvals: [ApprovalCard] = []   // waiting for my answer, oldest first; the first is shown
     var questions: [QuestionCard] = []   // Claude's questions (#19), after any approvals
     var terminals: [TerminalCard] = []   // things to run in Terminal myself (#19)
+    var typing = false                   // the "Type to Zoe" box is open (#37)
 
-    var isEmpty: Bool { you.isEmpty && reply.isEmpty && waiting == 0 }
+    var isEmpty: Bool { you.isEmpty && reply.isEmpty && waiting == 0 && !typing }
     var waiting: Int { approvals.count + questions.count + terminals.count }
 }
 
@@ -97,6 +98,30 @@ struct ApprovalCard: Equatable {
 @MainActor @Observable
 final class BubbleHover { var on = false }
 
+/// What I'm typing (#37): outside the measured value, so typing doesn't relayout the panel.
+@MainActor @Observable
+final class TypingState { var text = "" }
+
+/// The text box, focused as soon as it appears.
+struct TypingField: View {
+    let state: TypingState
+    var onSend: () -> Void
+    var onCancel: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack {
+            TextField("Type to Zoe…", text: Binding(get: { state.text }, set: { state.text = $0 }))
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit(onSend)
+                .onExitCommand(perform: onCancel)
+            Button("Send", action: onSend).disabled(state.text.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .onAppear { focused = true }
+    }
+}
+
 struct BubbleView: View {
     let model: BubbleContent
     let hover: BubbleHover
@@ -109,6 +134,9 @@ struct BubbleView: View {
     var onTerminal: (String, Bool) -> Void = { _, _ in }      // (id, open)
     var onHandOff: () -> Void = {}                             // the way out: the whole conversation in Terminal
     var onRunInTerminal: (String) -> Void = { _ in }           // a command card: run it in Terminal myself
+    var typingState: TypingState? = nil
+    var onTypedSend: () -> Void = {}
+    var onTypedCancel: () -> Void = {}
 
     enum QuestionAction { case choose(String), toggle(String), done, other, send }
 
@@ -140,6 +168,9 @@ struct BubbleView: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            if model.typing, let typingState {
+                TypingField(state: typingState, onSend: onTypedSend, onCancel: onTypedCancel)
             }
             if let a = model.approvals.first {
                 if !model.you.isEmpty || !model.reply.isEmpty { Divider().padding(.vertical, 2) }
@@ -283,6 +314,23 @@ final class BubbleWindow {
     var onHandOff: (() -> Void)?
     /// A command card's "Run in Terminal": (card).
     var onRunInTerminal: ((ApprovalCard) -> Void)?
+    /// A typed request (#37).
+    var onTyped: ((String) -> Void)?
+    private let typingState = TypingState()
+
+    /// Opens the "Type to Zoe" box and takes keystrokes (without activating the app).
+    func openTyping() {
+        hideTask?.cancel()
+        model.typing = true
+        relayout()
+        panel.makeKey()
+    }
+
+    func closeTyping() {
+        model.typing = false
+        typingState.text = ""
+        if model.isEmpty { hide() } else { relayout() }
+    }
 
     func showTerminal(_ t: TerminalCard) {
         hideTask?.cancel()
@@ -452,11 +500,20 @@ final class BubbleWindow {
                        onRunInTerminal: { [weak self] id in
                            guard let self, let a = self.model.approvals.first(where: { $0.id == id }) else { return }
                            self.onRunInTerminal?(a)
-                       })
+                       },
+                       typingState: typingState,
+                       onTypedSend: { [weak self] in
+                           guard let self else { return }
+                           let t = self.typingState.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                           guard !t.isEmpty else { return }
+                           self.closeTyping()
+                           self.onTyped?(t)
+                       },
+                       onTypedCancel: { [weak self] in self?.closeTyping() })
         }
         func measure(_ w: CGFloat?) -> NSSize { NSHostingView(rootView: view(w)).fittingSize }
         let pad: CGFloat = 6 * 2          // the outer padding; `width` includes the inner one
-        var width = shown.card || shown.waiting > 0 ? BubbleView.maxWidth : min(measure(nil).width - pad, BubbleView.maxWidth)
+        var width = shown.card || shown.waiting > 0 || shown.typing ? BubbleView.maxWidth : min(measure(nil).width - pad, BubbleView.maxWidth)
         var size = measure(width)
         if !shown.card && size.height > BubbleView.cardHeight + 80 {
             shown.card = true; width = BubbleView.maxWidth; size = measure(width)

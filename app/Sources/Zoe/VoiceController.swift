@@ -149,9 +149,15 @@ final class VoiceController {
     /// The reply has been spoken (or there was nothing to say).
     var onReplyDone: (() -> Void)?
 
+    /// Quiet mode (#36): nothing is spoken (no reply, no "On it.", no prompts); approvals are click-only.
+    var quiet = false
+    /// Silent: quiet mode, or another app is on a call (#38) — then typed requests are answered on screen only.
+    var silent: Bool { quiet || machine.inCall }
+
     /// A sentence of the reply, as it streams from the core.
     func speak(_ text: String) {
         ackTask?.cancel()
+        if silent { return }
         if firstSentence { firstSentence = false; metric("first reply sentence") }
         speaker.enqueue(text)
     }
@@ -167,7 +173,7 @@ final class VoiceController {
         ackTask?.cancel()
         ackTask = Task { [weak self, ackDelay] in
             try? await Task.sleep(for: ackDelay)
-            guard !Task.isCancelled, let self, !self.speaker.isSpeaking else { return }
+            guard !Task.isCancelled, let self, !self.speaker.isSpeaking, !self.silent else { return }
             self.speaker.playAcknowledgement()
             self.metric("acknowledgement (\"On it.\")")
         }
@@ -208,7 +214,7 @@ final class VoiceController {
     private var canListen: Bool { audio.isRunning && listener != nil }
 
     private func promptNext() {
-        guard let a = approvalQueue.first else { return }
+        guard let a = approvalQueue.first, !silent else { return }      // quiet or in a call: cards only, by click
         let listen = a.voiceOK && canListen
         let tail = a.question != nil ? (a.voiceOK && !listen ? "Answer it on screen." : "")
             : !a.voiceOK ? "This one needs a click." : listen ? "Say yes or no." : "Approve it on screen."
@@ -350,6 +356,8 @@ final class VoiceController {
             ackTask?.cancel()
             speaker.stop()
             onInterrupt?()
+        case .stopSpeaking:
+            speaker.stop()                     // a call started: not a word more
         case .refuse(let why):
             NSSound.beep()
             onStatus?("Not now: \(why)")

@@ -56,6 +56,8 @@ _UNSPEAKABLE = re.compile(
     r"^\s*(```|\||[-*+•]\s|\d+[.)]\s|#{1,6}\s|>\s)|https?://|`[^`]+`|\]\(")
 
 ON_SCREEN = "The details are on screen."
+QUIET_ON = re.compile(r"^\W*(?:zoe,? )?(?:quiet mode|go quiet|be quiet|silent mode|mute yourself|stop talking)\W*$", re.I)
+QUIET_OFF = re.compile(r"^\W*(?:zoe,? )?(?:talk to me again|voice mode|unmute|you can talk again|speak again)\W*$", re.I)
 ALL_ON_SCREEN = "The answer is on screen."
 READ_ALL = re.compile(r"^\W*(read (it|that|this) (all|out)|read (it )?all|read (me )?(the whole thing|everything))\W*$", re.I)
 

@@ -118,6 +118,10 @@ def paths_in(tool_input: dict) -> list[str]:
     return [v for k in PATH_FIELDS if isinstance(v := (tool_input or {}).get(k), str)]
 
 
+# Zoe's own in-process tools (they only display things): allowed by exact name.
+from .ui import EXACT_NAMES as UI_TOOLS  # noqa: E402
+
+
 def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
     """The policy for one call. Pure: no taint (#18) and no I/O here."""
     if not isinstance(tool_name, str) or not tool_name:
@@ -134,6 +138,8 @@ def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
         return Decision(Policy.ALLOW, "web read")
     if tool_name in BUILTIN_PLUMBING:
         return Decision(Policy.ALLOW, "session plumbing")
+    if tool_name in UI_TOOLS:
+        return Decision(Policy.ALLOW, "draws a panel")
     if tool_name in CLICK_ONLY or _DESTRUCTIVE.search(tool_name.split("__")[-1]):
         return Decision(Policy.CLICK, "runs a command or deletes something: needs a click")
     if tool_name in BUILTIN_EDIT:

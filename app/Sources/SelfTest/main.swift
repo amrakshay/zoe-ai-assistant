@@ -90,7 +90,7 @@ do {
     check("…and the conversation continues after the reply", a[4] == [.setState(.listening)] && m.phase == .listening(.handsFree))
 
     (m, a) = run([.click(0), .callStarted, .keyDown(2), .click(3), .callEnded, .keyDown(10)])
-    check("a call stops the conversation and the engine", a[1] == [.discardTurn, .stopEngine, .setState(.inCall)])
+    check("a call stops the conversation, the engine and any speech", a[1] == [.discardTurn, .stopEngine, .stopSpeaking, .setState(.inCall)])
     check("triggers are refused during a call", a[2] == [.refuse("in a call")] && a[3] == [.refuse("in a call")])
     check("after the call, the hotkey works again", a[5] == start)
 

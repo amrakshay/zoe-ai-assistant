@@ -191,8 +191,8 @@ final class VoiceController {
             audio.stop()
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
+                guard let self, self.machine.phase == .idle else { return }   // a new conversation already started
                 print("[metrics] conversation ended; mic held: \(CallDetect.selfCapturing())")
-                _ = self
             }
             audio.samplesQueue.async { [listener] in listener?.pause() }
             unloadTask?.cancel()

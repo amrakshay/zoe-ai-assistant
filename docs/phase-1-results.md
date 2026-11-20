@@ -48,6 +48,16 @@ No audio, recordings or transcripts are kept or committed. The numbers come from
 | Drag the orb: the position is saved and restored after a relaunch | ✔ |
 | Orb visible over a full-screen app | ✔ |
 
+## Live checks of the remaining features (2026-11-20)
+
+| Check | Result |
+|---|---|
+| Hold right ⌥, speak, release: one turn, answered, then the conversation ends by itself and the mic is released | ✔ |
+| A long answer (a week of meetings): spoken as a short summary with "The details are on screen" and the full card | ✔ (confirmed by ear and eye; Claude took 17.7 s to start, with many calendar calls) |
+| "Read it all": reads the whole answer without asking Claude again | ✔ (reply audio 0.52 s after the turn) |
+
+Not tried live: call detection (refusing to start, or stopping, when another app holds the mic); it's covered by the self-test and the phase 0 test (F07). A first install from a downloaded release (Gatekeeper's Open Anyway, the first `uv sync` with an empty cache) waits for the 0.1.0 release.
+
 ## Problems found
 
 1. **The bubble clipped long replies** (the last lines were cut off). It was sized from the text's one-line width, so wrapped text ran past the panel. Fixed: the bubble now measures the wrapped height at its width and becomes a scrolling card past ~340 pt.

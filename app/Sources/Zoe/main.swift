@@ -56,6 +56,15 @@ if let i = args.firstIndex(of: "--smoke") {
                     print("> \(texts[turn])")
                     if texts[turn] == "<<handoff>>" {      // Open in Terminal (not actually opened in smoke mode)
                         link.send(CoreMessage("open_session", ["where": "terminal"]))
+                    } else if texts[turn].hasPrefix("<<wait "), let n = Double(texts[turn].dropFirst(7).dropLast(2)) {
+                        // <<wait N>>: pause N seconds, then the next line (idle-close tests)
+                        let next = turn + 1
+                        Thread.sleep(forTimeInterval: n)
+                        turn = next
+                        if turn < texts.count {
+                            sentAt = Date(); print("> \(texts[turn])")
+                            link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
+                        } else { done.signal() }
                     } else {
                         link.send(CoreMessage("utterance", ["id": "smoke-\(turn + 1)", "text": texts[turn], "trigger": "text"]))
                     }

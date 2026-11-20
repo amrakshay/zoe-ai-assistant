@@ -15,9 +15,20 @@ A voice assistant for my Mac that does its work through **Claude Code**, so it h
 
 ## Install
 
-```bash
-brew install --cask amrakshay/tap/zoe
-```
+1. Install [uv](https://docs.astral.sh/uv/), which runs Zoe's core:
+
+   ```bash
+   brew install uv
+   ```
+
+2. Download `Zoe-X.Y.Z.zip` from the [latest release](https://github.com/amrakshay/zoe-ai-assistant/releases/latest), unzip it, and move `Zoe.app` to Applications.
+3. Optionally, check the zip was built by this repo's CI:
+
+   ```bash
+   gh attestation verify Zoe-X.Y.Z.zip -R amrakshay/zoe-ai-assistant
+   ```
+
+A Homebrew cask is ready (`scripts/make-cask.sh`) but not published yet.
 
 - Zoe is free and **not notarized**, so macOS blocks the first launch: open it once, then System Settings → Privacy & Security → "Zoe was blocked…" → **Open Anyway**.
 - Sign in to Claude Code once (run `claude`) if you haven't.
@@ -51,7 +62,7 @@ Swift menu-bar app                                   Python core (child process,
 ## Requirements
 
 - macOS 26 or later on Apple Silicon.
-- [uv](https://docs.astral.sh/uv/) (the cask installs it).
+- [uv](https://docs.astral.sh/uv/).
 - Claude Code, signed in. Zoe uses your existing Claude login through the Agent SDK; it never asks for an API key.
 - Permissions: Microphone and Accessibility (push-to-talk key, reading the selection, paste).
 

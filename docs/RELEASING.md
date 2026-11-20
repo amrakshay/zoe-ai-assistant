@@ -40,6 +40,8 @@ CI runs steps 2–4 on every PR too, starts the bundled core with the echo brain
 
 ## Homebrew tap setup
 
+**Not set up yet:** releases currently ship the zip only (the release job skips the tap while `HOMEBREW_TAP_TOKEN` is missing), and the README tells users to download it from Releases. When the tap is set up, switch the README's install section back to `brew install --cask amrakshay/tap/zoe`.
+
 Zoe uses the same tap as maclens, `amrakshay/homebrew-tap` (cask `Casks/zoe.rb`). The main `homebrew/cask` repo only accepts notarized apps.
 
 One-time setup:

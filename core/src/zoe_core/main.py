@@ -96,7 +96,8 @@ class Core:
         uid = msg.get("id")
         if self.brain:
             ctx = msg.get("context") if isinstance(msg.get("context"), dict) else None
-            self.brain.handle(uid, text, ctx)
+            drop = msg.get("dropped") if isinstance(msg.get("dropped"), dict) else None
+            self.brain.handle(uid, text, ctx, drop)
             return
         await self.send("state", value="thinking")
         await self.send("say", utterance_id=uid, text=f"You said: {text}", final=True)

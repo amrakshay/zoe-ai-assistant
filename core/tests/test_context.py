@@ -63,3 +63,17 @@ def test_utterance_with_context_taints_the_session_before_anything_is_sent():
     b.ready = no_claude
     asyncio.run(b._run("u1", "what's this error?", SNAP))
     assert "your screen" in b.gate.taint.sources
+
+
+def test_dropped_items_are_untrusted_and_taint():
+    from zoe_core.brain import Brain
+    from zoe_core.context import describe_drop
+    assert "File (read it with the Read tool" in describe_drop({"kind": "file", "value": "/Users/me/report.pdf"})
+    assert describe_drop({"kind": "url", "value": ""}) == "" and describe_drop(None) == ""
+    b = Brain(Wire())
+
+    async def no_claude():
+        raise RuntimeError("no Claude in tests")
+    b.ready = no_claude
+    asyncio.run(b._run("u1", "summarise it", None, {"kind": "text", "value": "some pasted text"}))
+    assert "a dropped item" in b.gate.taint.sources

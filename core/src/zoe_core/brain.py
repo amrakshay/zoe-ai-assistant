@@ -23,7 +23,7 @@ from .approvals import Approvals
 from .names import Names
 from .renderers import render
 from .terminal import TerminalHandoff
-from .context import Context, SOURCE as SCREEN, with_context
+from .context import DROP_SOURCE, Context, SOURCE as SCREEN, describe_drop, with_context
 from .ui import UI
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
@@ -447,12 +447,12 @@ class Brain:
             self._connecting = None  # let the next turn retry
             raise
 
-    def handle(self, utterance_id: Any, text: str, context: dict | None = None) -> None:
+    def handle(self, utterance_id: Any, text: str, context: dict | None = None, dropped: dict | None = None) -> None:
         """Start a turn; a new utterance interrupts the one still running. `context`: a screen snapshot the app
         attached because I said "this" / "here" / "on screen" (#42)."""
         if self._turn and not self._turn.done():
             self._turn.cancel()
-        self._turn = asyncio.create_task(self._run(utterance_id, text, context))
+        self._turn = asyncio.create_task(self._run(utterance_id, text, context, dropped))
 
     async def interrupt(self) -> None:
         self.approvals.cancel_all("interrupt")   # hooks wait in the SDK's task, not the turn's
@@ -475,7 +475,7 @@ class Brain:
         await self.send("say", utterance_id=uid, text="", final=True)
         await self.send("state", value="idle")
 
-    async def _run(self, uid: Any, text: str, context: dict | None = None) -> None:
+    async def _run(self, uid: Any, text: str, context: dict | None = None, dropped: dict | None = None) -> None:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
@@ -496,6 +496,9 @@ class Brain:
         if context:
             self.gate.taint.mark(SCREEN)         # screen text is untrusted (#42)
             prompt = with_context(text, context)
+        if dropped and (d := describe_drop(dropped)):
+            self.gate.taint.mark(DROP_SOURCE)    # a dropped item is untrusted (#44)
+            prompt = f"{prompt}\n\n{d}"
         t0 = time.monotonic()
         first = None
         splitter = SentenceSplitter()

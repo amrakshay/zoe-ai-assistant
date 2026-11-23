@@ -369,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
     private let typeHotkey = Hotkey(kind: .typeShortcut)
+    private var droppedItem: [String: Any]?       // the next request carries it (#44)
     private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
     private let quietItem = NSMenuItem(title: "Quiet Mode", action: #selector(toggleQuiet), keyEquivalent: "")
     private static let quietKey = "quietMode"
@@ -437,6 +438,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
         panels.onChoice = { [weak self] choice in self?.sendTyped(choice, trigger: "click") }
         bubble.onTyped = { [weak self] text in self?.sendTyped(text, trigger: "text") }
+        character.onDrop = { [weak self] kind, value in
+            guard let self else { return }
+            self.droppedItem = ["kind": kind, "value": value]
+            let name = kind == "file" ? (value as NSString).lastPathComponent : kind == "url" ? (URL(string: value)?.host ?? value) : "some text"
+            self.bubble.setSeen("dropped: \(name) — what should I do with it?")
+            self.bubble.openTyping()
+        }
         typeHotkey.onSignal = { sig in
             if sig == .down { Task { @MainActor [weak self] in self?.typeToZoe() } }
         }
@@ -480,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.current = "u\(self.counter)"
             var msg: [String: Any] = ["id": self.current!, "text": text, "trigger": "ptt"]
             if let ctx = self.screenContext(for: text, allowCopy: true) { msg["context"] = ctx }
+            if let d = self.droppedItem { msg["dropped"] = d; self.droppedItem = nil }
             self.link.send(CoreMessage("utterance", msg))
             self.voice.turnSent()
         }
@@ -553,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var msg: [String: Any] = ["id": current!, "text": t, "trigger": trigger]
         // Typed: Accessibility only (Zoe's own text box has the keyboard, so ⌘C would copy from Zoe).
         if let ctx = screenContext(for: t, allowCopy: false) { msg["context"] = ctx }
+        if let d = droppedItem { msg["dropped"] = d; droppedItem = nil; bubble.setSeen("with the dropped item") }
         link.send(CoreMessage("utterance", msg))
         voice.typedTurnSent()
     }

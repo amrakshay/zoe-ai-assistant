@@ -122,6 +122,7 @@ def paths_in(tool_input: dict) -> list[str]:
 from .ui import EXACT_NAMES as UI_TOOLS  # noqa: E402
 from .context import EXACT_NAMES as CONTEXT_TOOLS  # noqa: E402
 from .mac import EXACT_NAMES as MAC_TOOLS  # noqa: E402
+from .capture import EXACT_NAMES as CAPTURE_TOOLS  # noqa: E402
 
 
 def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
@@ -144,6 +145,8 @@ def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
         return Decision(Policy.ALLOW, "draws a panel")
     if tool_name in CONTEXT_TOOLS:
         return Decision(Policy.ALLOW, "reads the screen (and taints the session)")
+    if tool_name in CAPTURE_TOOLS:
+        return Decision(Policy.ALLOW, "adds to your own notes or reminders")
     if tool_name in MAC_TOOLS:
         return Decision(Policy.ASK, "acts on your Mac")
     if tool_name in CLICK_ONLY or _DESTRUCTIVE.search(tool_name.split("__")[-1]):

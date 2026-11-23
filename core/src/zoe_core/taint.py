@@ -67,7 +67,7 @@ class Taint:
         if tool == "mcp__mac__get_clipboard":   # so is the clipboard (#45)
             self.mark("your clipboard")
             return
-        if tool.startswith("mcp__mac__"):       # other Mac actions read nothing in
+        if tool.startswith(("mcp__mac__", "mcp__capture__")):   # other Mac actions and capture read nothing in
             return
         if tool in WEB:
             self.mark("the web")

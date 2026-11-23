@@ -48,6 +48,9 @@ class Core:
         elif t == "take_back":
             if self.brain:
                 self.brain.take_back()
+        elif t == "reminder_result":
+            if self.brain:
+                self.brain.capture.reminder_done(msg)
         elif t == "context_snapshot":
             if self.brain:
                 self.brain.context.snapshot(msg)

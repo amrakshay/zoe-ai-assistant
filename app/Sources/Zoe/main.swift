@@ -654,6 +654,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "add_reminder":              // "remind me at 4 to …" (#47)
+            let id = m.string("id") ?? ""
+            let title = m.string("title") ?? "", due = m.string("due") ?? ""
+            Task { @MainActor [weak self] in
+                let r = await Reminders.add(title: title, due: due)
+                self?.link.send(CoreMessage("reminder_result", ["id": id, "ok": r.ok, "detail": r.detail]))
+            }
         case "context_request":           // Claude asked for the screen (get_frontmost, #42)
             let s = ScreenContext.snapshot(copyIfNeeded: false)
             bubble.setSeen(s.app.isEmpty ? "" : seenLine(s))

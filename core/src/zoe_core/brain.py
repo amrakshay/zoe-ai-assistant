@@ -54,6 +54,8 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
 - The user's words come from speech-to-text, which can mishear short technical words ("ls" as "is"). If a
   request to run, change or send something is unclear or doesn't quite make sense, say what you understood in
   one sentence and ask before doing anything; don't go exploring to guess.
+- "Note this", "todo: …" and "remind me at 4 to …": use mcp__capture__add_note, add_todo or remind_me
+  (give remind_me a local date-time like 2026-11-23T16:00).
 - For more than about three items, tables, code or links, draw instead of talking: mcp__ui__show_table or
   mcp__ui__show_card, then say one short sentence. Offer choices with mcp__ui__show_choices.
 - Before sending to a Slack user or channel by ID, look it up first (slack_read_user_profile with its user_id,
@@ -127,6 +129,8 @@ class Brain:
         self.ui = UI(send, session_id=lambda: self.session_id)
         self._ui_server = None
         self.context = Context(send)
+        from .capture import Capture
+        self.capture = Capture(send)
         self._context_server = None
         self.sessions: list[Session] = []
         self.active = self.new_session(home())
@@ -379,11 +383,17 @@ class Brain:
                    "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
                    "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
             can_use_tool=can_use_tool,
-            mcp_servers={"ui": self.ui_server(), "context": self.context_server(), "mac": self.mac_server()},
+            mcp_servers={"ui": self.ui_server(), "context": self.context_server(), "mac": self.mac_server(),
+                         "capture": self.capture_server()},
             include_partial_messages=True,
             resume=s.session_id,
             fork_session=bool(s.fork_next and s.session_id),
         )
+
+    def capture_server(self):
+        if getattr(self, "_capture_server", None) is None:
+            self._capture_server = self.capture.server()
+        return self._capture_server
 
     def mac_server(self):
         if getattr(self, "_mac_server", None) is None:

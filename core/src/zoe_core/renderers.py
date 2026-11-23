@@ -209,6 +209,10 @@ def render(req: ApprovalRequest, names: Names | None = None) -> dict:
             card = _fetch(req)
         elif req.tool_name.startswith("mcp__mac__"):
             card = _mac(req)
+        elif req.tool_name == "mcp__context__take_screenshot":
+            card = {"title": "Take a screenshot of the front window?", "fields": [],
+                    "summary": "Take a screenshot of the front window? It needs a click.",
+                    "why": "Claude looks at it for this turn; the file is deleted afterwards."}
         elif req.tool_name.startswith("mcp__"):
             card = _event(req) or _message(req, names) or raw_card(req)
         else:

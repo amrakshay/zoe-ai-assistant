@@ -143,6 +143,8 @@ def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
         return Decision(Policy.ALLOW, "session plumbing")
     if tool_name in UI_TOOLS:
         return Decision(Policy.ALLOW, "draws a panel")
+    if tool_name == "mcp__context__take_screenshot":
+        return Decision(Policy.CLICK, "takes a screenshot of the front window: needs a click")
     if tool_name in CONTEXT_TOOLS:
         return Decision(Policy.ALLOW, "reads the screen (and taints the session)")
     if tool_name in CAPTURE_TOOLS:

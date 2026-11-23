@@ -51,6 +51,9 @@ class Core:
         elif t == "reminder_result":
             if self.brain:
                 self.brain.capture.reminder_done(msg)
+        elif t == "screenshot_result":
+            if self.brain:
+                self.brain.context.screenshot_done(msg)
         elif t == "context_snapshot":
             if self.brain:
                 self.brain.context.snapshot(msg)

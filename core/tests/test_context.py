@@ -1,7 +1,7 @@
 """Screen context (#42)."""
 import asyncio
 
-from zoe_core.context import EXACT_NAMES, Context, describe, with_context
+from zoe_core.context import Context, describe, with_context
 from zoe_core.gate import Gate
 from zoe_core.policy import Policy, decide
 
@@ -29,8 +29,7 @@ def test_selection_is_size_limited():
 
 
 def test_get_frontmost_is_allowed_and_taints():
-    for n in EXACT_NAMES:
-        assert decide(n, {}).policy is Policy.ALLOW
+    assert decide("mcp__context__get_frontmost", {}).policy is Policy.ALLOW
     g = Gate()
     out = asyncio.run(g.pre_tool_use({"tool_name": "mcp__context__get_frontmost", "tool_input": {}}, "t", None))
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow" and "your screen" in g.taint.sources
@@ -77,3 +76,30 @@ def test_dropped_items_are_untrusted_and_taint():
     b.ready = no_claude
     asyncio.run(b._run("u1", "summarise it", None, {"kind": "text", "value": "some pasted text"}))
     assert "a dropped item" in b.gate.taint.sources
+
+
+def test_screenshots_need_a_click_and_are_deleted_after_the_turn(tmp_path):
+    assert decide("mcp__context__take_screenshot", {}).policy is Policy.CLICK
+    from zoe_core.gate import ApprovalRequest
+    from zoe_core.renderers import render
+    c = render(ApprovalRequest("mcp__context__take_screenshot", {}, Policy.CLICK, "x", "t"))
+    assert c["title"].startswith("Take a screenshot")
+    f = tmp_path / "shot.png"
+    f.write_bytes(b"png")
+    ctx = Context(Wire())
+    ctx.turn_files.append(str(f))
+    assert ctx.cleanup() == 1 and not f.exists() and ctx.turn_files == []
+
+
+def test_screenshot_round_trip():
+    async def go():
+        w = Wire()
+        c = Context(w)
+        t = asyncio.create_task(c.screenshot())
+        while not w.sent:
+            await asyncio.sleep(0)
+        rid = w.sent[0][1]["id"]
+        assert w.sent[0][0] == "screenshot_request"
+        c.screenshot_done({"id": rid, "path": "/tmp/x.png", "app": "Slack"})
+        return await t
+    assert asyncio.run(go()) == {"path": "/tmp/x.png", "app": "Slack", "detail": ""}

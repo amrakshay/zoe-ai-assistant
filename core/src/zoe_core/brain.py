@@ -583,6 +583,8 @@ class Brain:
             await self.send("say", utterance_id=uid, text="Sorry, I couldn't reach Claude just now.", final=True)
             await self.send("error", message=f"brain: {e}")
         finally:
+            if self.context.cleanup():                # screenshots never outlive their turn (#43)
+                log("deleted this turn's screenshots")
             await self.send("state", value="idle")
 
     async def close(self) -> None:

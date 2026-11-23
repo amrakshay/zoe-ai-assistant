@@ -695,6 +695,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "screenshot_request":        // after my click on the card (#43)
+            let id = m.string("id") ?? ""
+            Task { @MainActor [weak self] in
+                let r = await Screenshot.frontWindow()
+                self?.bubble.setSeen(r.path.isEmpty ? "" : "screenshot of \(r.app) (deleted after this turn)")
+                self?.link.send(CoreMessage("screenshot_result", ["id": id, "path": r.path, "app": r.app, "detail": r.detail]))
+            }
         case "add_reminder":              // "remind me at 4 to …" (#47)
             let id = m.string("id") ?? ""
             let title = m.string("title") ?? "", due = m.string("due") ?? ""

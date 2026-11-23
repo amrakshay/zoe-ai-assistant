@@ -13,7 +13,7 @@ from typing import Any
 APP_TO_CORE = {
     "hello", "ping", "utterance", "user_interrupted", "dropped", "context_snapshot", "answer",
     "open_session", "take_back", "cancel", "chat_message", "presence", "mute", "shutdown", "listening",
-    "context_snapshot", "reminder_result",
+    "context_snapshot", "reminder_result", "screenshot_result",
 }
 
 MAX_LINE = 1 << 20  # 1 MiB: anything longer is rejected rather than buffered without bound

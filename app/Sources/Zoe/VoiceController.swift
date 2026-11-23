@@ -145,13 +145,44 @@ final class VoiceController {
     func click() { triggerAt = Self.now(); handle(.click(triggerAt)) }
 
     /// The reply has been spoken (or shown); in a hands-free conversation Zoe listens again.
-    func replyFinished() { ackTask?.cancel(); onReplyDone?(); handle(.replyFinished(Self.now())) }
+    func replyFinished() {
+        ackTask?.cancel()
+        onReplyDone?()
+        // Wait for the last words to stop sounding before listening again, or Zoe hears its own tail.
+        let wait = speaker.tailGuard
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self else { return }
+            self.handle(.replyFinished(Self.now()))
+            if self.typedHold {                       // a typed request's reply is done: listen again
+                self.typedHold = false
+                if case .listening = self.machine.phase { self.audio.samplesQueue.async { [listener] in listener?.begin() } }
+            }
+        }
+    }
+
+    /// A typed request or clicked choice (#37, #35) during a hands-free conversation: don't listen while its
+    /// reply is spoken.
+    private var typedHold = false
+    func typedTurnSent() {
+        turnSent()
+        if case .listening = machine.phase, !silent {
+            typedHold = true
+            audio.samplesQueue.async { [listener] in listener?.pause() }
+        }
+    }
     /// The reply has been spoken (or there was nothing to say).
     var onReplyDone: (() -> Void)?
+
+    /// Quiet mode (#36): nothing is spoken (no reply, no "On it.", no prompts); approvals are click-only.
+    var quiet = false
+    /// Silent: quiet mode, or another app is on a call (#38) — then typed requests are answered on screen only.
+    var silent: Bool { quiet || machine.inCall }
 
     /// A sentence of the reply, as it streams from the core.
     func speak(_ text: String) {
         ackTask?.cancel()
+        if silent { return }
         if firstSentence { firstSentence = false; metric("first reply sentence") }
         speaker.enqueue(text)
     }
@@ -167,7 +198,7 @@ final class VoiceController {
         ackTask?.cancel()
         ackTask = Task { [weak self, ackDelay] in
             try? await Task.sleep(for: ackDelay)
-            guard !Task.isCancelled, let self, !self.speaker.isSpeaking else { return }
+            guard !Task.isCancelled, let self, !self.speaker.isSpeaking, !self.silent else { return }
             self.speaker.playAcknowledgement()
             self.metric("acknowledgement (\"On it.\")")
         }
@@ -208,7 +239,7 @@ final class VoiceController {
     private var canListen: Bool { audio.isRunning && listener != nil }
 
     private func promptNext() {
-        guard let a = approvalQueue.first else { return }
+        guard let a = approvalQueue.first, !silent else { return }      // quiet or in a call: cards only, by click
         let listen = a.voiceOK && canListen
         let tail = a.question != nil ? (a.voiceOK && !listen ? "Answer it on screen." : "")
             : !a.voiceOK ? "This one needs a click." : listen ? "Say yes or no." : "Approve it on screen."
@@ -327,7 +358,11 @@ final class VoiceController {
                     guard let self else { return }
                     self.onTurn?(samples)
                     do {
-                        let r = try await self.stt.transcribe(samples)
+                        var r = try await self.stt.transcribe(samples)
+                        if EchoFilter.isEcho(r.text, recentSpeech: self.speaker.recentSpeech(within: 15)) {
+                            print("[metrics] turn \(self.turnNo): dropped as Zoe's own echo")
+                            r = WhisperSTT.Result(text: "", millis: r.millis)
+                        }
                         self.metric(String(format: "transcript (Whisper %.0f ms, %.1f s of audio)", r.millis, Double(samples.count) / 16000))
                         self.onTranscript?(r.text, r.millis)
                         if r.text.isEmpty { self.replyFinished() }   // nothing said: keep listening
@@ -350,6 +385,8 @@ final class VoiceController {
             ackTask?.cancel()
             speaker.stop()
             onInterrupt?()
+        case .stopSpeaking:
+            speaker.stop()                     // a call started: not a word more
         case .refuse(let why):
             NSSound.beep()
             onStatus?("Not now: \(why)")

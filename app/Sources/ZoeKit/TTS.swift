@@ -40,6 +40,19 @@ public final class Speaker {
     private var awaitingFirstAudio = false   // only a reply's first sentence is timed
     private var idleTask: Task<Void, Never>?
     private var ack: [AVAudioPCMBuffer] = []
+    private var spoken: [(at: TimeInterval, text: String)] = []
+
+    /// What Zoe said in the last `seconds` (for the echo filter).
+    public func recentSpeech(within seconds: TimeInterval) -> String {
+        spoken.filter { Self.now() - $0.at <= seconds }.map(\.text).joined(separator: " ")
+    }
+
+    /// How long after a buffer is "played" it is still coming out of the speakers (the output device's
+    /// presentation latency), plus a little room for the echo to die down. At least 0.4 s.
+    public var tailGuard: Double {
+        let latency = engine?.outputNode.presentationLatency ?? 0
+        return max(0.4, latency + 0.3)
+    }
 
     public init(voice: AVSpeechSynthesisVoice? = nil) {
         self.voice = voice ?? Self.zoeVoice()
@@ -73,6 +86,7 @@ public final class Speaker {
     /// Plays the cached acknowledgement now (no synthesis). Part of the current reply.
     public func playAcknowledgement() {
         guard !ack.isEmpty else { return }
+        spoken.append((Self.now(), "On it."))
         beginReplyIfNeeded()
         for b in ack { schedule(b, gen: generation) }
     }
@@ -82,6 +96,8 @@ public final class Speaker {
     public func enqueue(_ text: String, onPlayed: Played? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { onPlayed?(); return }
+        spoken.append((Self.now(), t))
+        spoken.removeAll { Self.now() - $0.at > 60 }
         beginReplyIfNeeded()
         if awaitingFirstAudio && onPlayed == nil { firstEnqueueAt = firstEnqueueAt ?? Self.now() }
         queue.append((t, onPlayed))

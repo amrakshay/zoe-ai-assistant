@@ -58,6 +58,7 @@ Swift menu-bar app                                   Python core (child process,
 | [docs/phase-1-results.md](docs/phase-1-results.md) | Phase 1 acceptance run: measured budgets and latency |
 | [docs/phase-2-results.md](docs/phase-2-results.md) | Phase 2 acceptance run: the safety checks, budgets and what the live run found |
 | [docs/phase-3-results.md](docs/phase-3-results.md) | Phase 3 acceptance run: routing, resume, idle close and timings |
+| [docs/phase-4-results.md](docs/phase-4-results.md) | Phase 4 acceptance run: panels, quiet mode, typing, calls, and a two-day idle soak |
 | [docs/RELEASING.md](docs/RELEASING.md) | How releases work |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, branches, commits and checks |
 

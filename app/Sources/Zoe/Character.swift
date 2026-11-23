@@ -44,6 +44,8 @@ final class CharacterWindow {
     var state: State = .idle { didSet { if state != oldValue { orb.apply(state) } } }
     /// How many things wait for me (approvals, questions, Terminal cards): the badge (#21).
     var waiting = 0 { didSet { if waiting != oldValue { orb.setWaiting(waiting) } } }
+    /// Quiet mode (#36): a small muted mark on the orb.
+    var quiet = false { didSet { if quiet != oldValue { orb.setQuiet(quiet) } } }
     func level(_ v: Float) { orb.level(v) }
 
     private func savePosition() {
@@ -79,6 +81,8 @@ final class OrbView: NSView {
     private let badge = CALayer()
     private let badgeText = CATextLayer()
     private let hand = CATextLayer()
+    private let muted = CATextLayer()
+    private let phones = CATextLayer()
     private var state: CharacterWindow.State = .idle
     private var smoothed: Float = 0
     private var dragStart: NSPoint?
@@ -143,7 +147,11 @@ final class OrbView: NSView {
         badge.addSublayer(badgeText)
         hand.string = "✋"; hand.fontSize = 18; hand.contentsScale = 2
         hand.frame = CGRect(x: r.minX - 12, y: r.maxY - 14, width: 26, height: 26)
-        for l in [badge, hand] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
+        muted.string = "🔇"; muted.fontSize = 15; muted.contentsScale = 2
+        muted.frame = CGRect(x: r.minX - 10, y: r.minY - 6, width: 24, height: 24)
+        phones.string = "🎧"; phones.fontSize = 22; phones.contentsScale = 2; phones.alignmentMode = .center
+        phones.frame = CGRect(x: r.midX - 16, y: r.maxY - 12, width: 32, height: 30)
+        for l in [badge, hand, muted, phones] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
 
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
         apply(.idle)
@@ -187,6 +195,7 @@ final class OrbView: NSView {
         halo.strokeColor = accent
         arc.strokeColor = accent
         halo.opacity = s == .listening ? 0.8 : 0
+        phones.opacity = s == .inCall ? 1 : 0          // in a call (#38)
         arc.opacity = s == .thinking ? 1 : 0
         body.setAffineTransform(.identity)
         halo.setAffineTransform(.identity)
@@ -210,6 +219,12 @@ final class OrbView: NSView {
             eyes.add(blink, forKey: "blink")
         }
         smoothed = 0
+    }
+
+    func setQuiet(_ on: Bool) {
+        CATransaction.begin(); CATransaction.setAnimationDuration(0.2)
+        muted.opacity = on ? 1 : 0
+        CATransaction.commit()
     }
 
     func setWaiting(_ n: Int) {

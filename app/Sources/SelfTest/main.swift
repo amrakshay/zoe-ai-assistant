@@ -90,7 +90,7 @@ do {
     check("…and the conversation continues after the reply", a[4] == [.setState(.listening)] && m.phase == .listening(.handsFree))
 
     (m, a) = run([.click(0), .callStarted, .keyDown(2), .click(3), .callEnded, .keyDown(10)])
-    check("a call stops the conversation and the engine", a[1] == [.discardTurn, .stopEngine, .setState(.inCall)])
+    check("a call stops the conversation, the engine and any speech", a[1] == [.discardTurn, .stopEngine, .stopSpeaking, .setState(.inCall)])
     check("triggers are refused during a call", a[2] == [.refuse("in a call")] && a[3] == [.refuse("in a call")])
     check("after the call, the hotkey works again", a[5] == start)
 
@@ -169,6 +169,18 @@ do {
     check("speech that began during the prompt doesn't count", !VoiceAnswer.accepted(speechStart: 9.95, promptEnd: 10))
     check("…nor within the echo tail", !VoiceAnswer.accepted(speechStart: 10.05, promptEnd: 10))
     check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
+}
+
+// MARK: echo filter
+print("Echo filter")
+do {
+    let said = "You have three meetings today. The first one is at ten. The details are on screen."
+    check("the tail of Zoe's reply is echo", EchoFilter.isEcho("the details are on screen", recentSpeech: said))
+    check("a mostly matching sentence is echo", EchoFilter.isEcho("you have three meetings today the first", recentSpeech: said))
+    check("a real follow-up isn't", !EchoFilter.isEcho("move the first one to eleven please", recentSpeech: said))
+    check("a short real answer isn't (not the end of the reply)", !EchoFilter.isEcho("yes", recentSpeech: said))
+    check("…unless it is the end of the reply", EchoFilter.isEcho("on screen", recentSpeech: said))
+    check("nothing said recently → never echo", !EchoFilter.isEcho("the details are on screen", recentSpeech: ""))
 }
 
 // MARK: spoken answers to Claude's questions (#19)

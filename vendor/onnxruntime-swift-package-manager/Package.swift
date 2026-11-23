@@ -2,7 +2,7 @@
 // Vendored from microsoft/onnxruntime-swift-package-manager 1.24.2 (MIT, see LICENSE; revision
 // b7fb7f7dea8a2469e6335d95a61b8f36d0dc83b2). The upstream GitHub repository returned 404 from 2026-11-20, so
 // SwiftPM could no longer clone it. Only the inference bindings are kept (no training, extensions or tests);
-// the ONNX Runtime binary itself is still Microsoft's release archive, verified by its SHA-256 checksum.
+// the ONNX Runtime binary is Microsoft's release archive, verified by its SHA-256 checksum.
 
 import PackageDescription
 
@@ -17,8 +17,10 @@ let package = Package(
                 dependencies: ["onnxruntime"],
                 path: "objectivec",
                 cxxSettings: [.define("SPM_BUILD")]),
+        // Microsoft's archive, byte-identical (the checksum below is Microsoft's), hosted on this repo's
+        // pre-release because download.onnxruntime.ai has served a mismatched certificate since 2026-11-20 (#50).
         .binaryTarget(name: "onnxruntime",
-                      url: "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-1.24.2.zip",
+                      url: "https://github.com/amrakshay/zoe-ai-assistant/releases/download/deps-onnxruntime-1.24.2/pod-archive-onnxruntime-c-1.24.2.zip",
                       checksum: "f7100a992d2a8135168c8afd831e6a58b465349101982aa58b3e11d36e600b54"),
     ],
     cxxLanguageStandard: .cxx17

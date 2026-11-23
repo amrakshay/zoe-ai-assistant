@@ -166,6 +166,36 @@ def _event(req: ApprovalRequest) -> dict | None:
             "summary": f"{verb} the calendar event{' ' + words(what[1], 8) if what else ''}?", "why": req.reason}
 
 
+def _mac(req: ApprovalRequest) -> dict:
+    """Mac actions (#45): exactly what will happen."""
+    _, action = service_of(req.tool_name)
+    i = req.tool_input
+    if action == "open_app":
+        return {"title": f"Open {str(i.get('name', '?'))[:60]}?", "fields": [field("App", i.get("name", ""))],
+                "summary": f"Open {words(i.get('name', ''), 4)}?", "why": req.reason}
+    if action == "reveal_in_finder":
+        return {"title": "Show in Finder?", "fields": [field("Path", i.get("path", ""), mono=True)],
+                "summary": "Show a file in Finder?", "why": req.reason}
+    if action == "set_volume":
+        return {"title": f"Set the volume to {i.get('percent')} %?", "fields": [],
+                "summary": f"Set the volume to {i.get('percent')} percent?", "why": req.reason}
+    if action == "notify":
+        return {"title": "Show a notification?", "fields": [field("Title", i.get("title", "Zoe")), field("Text", i.get("body", ""))],
+                "summary": "Show a notification?", "why": req.reason}
+    if action == "open_url":
+        url = str(i.get("url", ""))
+        domain = urlparse(url).hostname or "?"
+        return {"title": "Open a web page?", "fields": [field("Site", domain), field("Address", url, mono=True)],
+                "summary": f"Open a page on {domain}?", "why": req.reason}
+    if action == "get_clipboard":
+        return {"title": "Read your clipboard?", "fields": [],
+                "summary": "Read what's on your clipboard?", "why": "Its content is treated as untrusted from then on."}
+    if action == "set_clipboard":
+        return {"title": "Copy to your clipboard?", "fields": [field("Text", i.get("text", ""))],
+                "summary": f"Copy this to your clipboard: {words(i.get('text', ''))}?", "why": req.reason}
+    return raw_card(req)
+
+
 def render(req: ApprovalRequest, names: Names | None = None) -> dict:
     """The card for one approval request. Never raises: on any problem, the raw card."""
     try:
@@ -177,6 +207,8 @@ def render(req: ApprovalRequest, names: Names | None = None) -> dict:
             card = _write(req)
         elif req.tool_name in ("WebFetch", "WebSearch"):
             card = _fetch(req)
+        elif req.tool_name.startswith("mcp__mac__"):
+            card = _mac(req)
         elif req.tool_name.startswith("mcp__"):
             card = _event(req) or _message(req, names) or raw_card(req)
         else:

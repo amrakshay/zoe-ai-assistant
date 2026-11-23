@@ -379,11 +379,17 @@ class Brain:
                    "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
                    "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
             can_use_tool=can_use_tool,
-            mcp_servers={"ui": self.ui_server(), "context": self.context_server()},
+            mcp_servers={"ui": self.ui_server(), "context": self.context_server(), "mac": self.mac_server()},
             include_partial_messages=True,
             resume=s.session_id,
             fork_session=bool(s.fork_next and s.session_id),
         )
+
+    def mac_server(self):
+        if getattr(self, "_mac_server", None) is None:
+            from .mac import server
+            self._mac_server = server()
+        return self._mac_server
 
     def context_server(self):
         if self._context_server is None:

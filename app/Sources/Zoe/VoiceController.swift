@@ -145,7 +145,32 @@ final class VoiceController {
     func click() { triggerAt = Self.now(); handle(.click(triggerAt)) }
 
     /// The reply has been spoken (or shown); in a hands-free conversation Zoe listens again.
-    func replyFinished() { ackTask?.cancel(); onReplyDone?(); handle(.replyFinished(Self.now())) }
+    func replyFinished() {
+        ackTask?.cancel()
+        onReplyDone?()
+        // Wait for the last words to stop sounding before listening again, or Zoe hears its own tail.
+        let wait = speaker.tailGuard
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self else { return }
+            self.handle(.replyFinished(Self.now()))
+            if self.typedHold {                       // a typed request's reply is done: listen again
+                self.typedHold = false
+                if case .listening = self.machine.phase { self.audio.samplesQueue.async { [listener] in listener?.begin() } }
+            }
+        }
+    }
+
+    /// A typed request or clicked choice (#37, #35) during a hands-free conversation: don't listen while its
+    /// reply is spoken.
+    private var typedHold = false
+    func typedTurnSent() {
+        turnSent()
+        if case .listening = machine.phase, !silent {
+            typedHold = true
+            audio.samplesQueue.async { [listener] in listener?.pause() }
+        }
+    }
     /// The reply has been spoken (or there was nothing to say).
     var onReplyDone: (() -> Void)?
 
@@ -333,7 +358,11 @@ final class VoiceController {
                     guard let self else { return }
                     self.onTurn?(samples)
                     do {
-                        let r = try await self.stt.transcribe(samples)
+                        var r = try await self.stt.transcribe(samples)
+                        if EchoFilter.isEcho(r.text, recentSpeech: self.speaker.recentSpeech(within: 15)) {
+                            print("[metrics] turn \(self.turnNo): dropped as Zoe's own echo")
+                            r = WhisperSTT.Result(text: "", millis: r.millis)
+                        }
                         self.metric(String(format: "transcript (Whisper %.0f ms, %.1f s of audio)", r.millis, Double(samples.count) / 16000))
                         self.onTranscript?(r.text, r.millis)
                         if r.text.isEmpty { self.replyFinished() }   // nothing said: keep listening

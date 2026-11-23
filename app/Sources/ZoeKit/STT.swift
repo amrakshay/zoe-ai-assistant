@@ -72,6 +72,7 @@ public actor WhisperSTT {
     public struct Result: Sendable {
         public let text: String
         public let millis: Double
+        public init(text: String, millis: Double) { self.text = text; self.millis = millis }
     }
 
     /// Transcribes 16 kHz mono samples. Returns trimmed text ("" if nothing was said).

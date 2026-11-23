@@ -512,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         current = "u\(counter)"
         bubble.showYou(t)
         link.send(CoreMessage("utterance", ["id": current!, "text": t, "trigger": trigger]))
-        voice.turnSent()
+        voice.typedTurnSent()
     }
 
     /// Recent Sessions (#30): title, folder and age; Continue Here or Open in Terminal.

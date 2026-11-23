@@ -171,6 +171,18 @@ do {
     check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
 }
 
+// MARK: echo filter
+print("Echo filter")
+do {
+    let said = "You have three meetings today. The first one is at ten. The details are on screen."
+    check("the tail of Zoe's reply is echo", EchoFilter.isEcho("the details are on screen", recentSpeech: said))
+    check("a mostly matching sentence is echo", EchoFilter.isEcho("you have three meetings today the first", recentSpeech: said))
+    check("a real follow-up isn't", !EchoFilter.isEcho("move the first one to eleven please", recentSpeech: said))
+    check("a short real answer isn't (not the end of the reply)", !EchoFilter.isEcho("yes", recentSpeech: said))
+    check("…unless it is the end of the reply", EchoFilter.isEcho("on screen", recentSpeech: said))
+    check("nothing said recently → never echo", !EchoFilter.isEcho("the details are on screen", recentSpeech: ""))
+}
+
 // MARK: spoken answers to Claude's questions (#19)
 print("Option matching")
 do {

@@ -5,7 +5,7 @@ import SwiftUI
 /// The content comes from the core's `ui` tools and is shown verbatim. A new panel replaces the old one; it stays
 /// until I close it or Claude dismisses it. It never takes focus and is static when nothing changes.
 struct PanelContent: Equatable {
-    enum Kind: String { case card, table, choices }
+    enum Kind: String { case card, table, choices, draft }
     var id: String
     var kind: Kind
     var title: String
@@ -20,7 +20,7 @@ struct PanelContent: Equatable {
               let p = m["payload"] as? [String: Any] else { return nil }
         self.id = id; kind = k
         title = (p["title"] as? String) ?? (p["prompt"] as? String) ?? ""
-        body = p["body"] as? String ?? ""
+        body = p["body"] as? String ?? p["text"] as? String ?? ""
         columns = p["columns"] as? [String] ?? []
         rows = (p["rows"] as? [[Any]] ?? []).map { $0.map { "\($0)" } }
         truncatedRows = p["truncated_rows"] as? Int ?? 0
@@ -39,6 +39,9 @@ final class PanelState {
     var sortColumn: Int? = nil
     var ascending = true
     var copied = false
+    var draft = ""                 // the editable draft text (#46)
+    var target = ""                // "Paste into <app>"
+    var note = ""                  // e.g. "The front app is now X: click again to paste there"
 }
 
 struct PanelView: View {
@@ -48,6 +51,8 @@ struct PanelView: View {
     var onClose: () -> Void
     var onChoice: (String) -> Void
     var onCopy: () -> Void
+    var onPaste: () -> Void = {}
+    var onDiscard: () -> Void = {}
 
     static let width: CGFloat = 520
     static let maxHeight: CGFloat = 440
@@ -60,6 +65,7 @@ struct PanelView: View {
                 if content.kind == .table {
                     Button(state.copied ? "Copied" : "Copy") { onCopy() }.help("Copy as tab-separated text")
                 }
+                if content.kind == .draft { Image(systemName: "square.and.pencil").foregroundStyle(.secondary) }
                 Button { onClose() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
             }
@@ -72,6 +78,21 @@ struct PanelView: View {
                 .frame(height: height)
             case .table:
                 table
+            case .draft:
+                TextEditor(text: Binding(get: { state.draft }, set: { state.draft = $0 }))
+                    .font(.body)
+                    .frame(height: height)
+                    .scrollContentBackground(.hidden)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                if !state.note.isEmpty { Text(state.note).font(.caption).foregroundStyle(.orange) }
+                HStack {
+                    Text("Never sent: you press Send yourself.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Discard", action: onDiscard)
+                    Button(state.copied ? "Copied" : "Copy", action: onCopy)
+                    Button(state.target.isEmpty ? "Paste" : "Paste into \(state.target)", action: onPaste)
+                        .buttonStyle(.borderedProminent)
+                }
             case .choices:
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(content.options.enumerated()), id: \.offset) { _, o in
@@ -149,6 +170,12 @@ final class PanelWindow {
     private weak var anchor: NSWindow?
     /// A click on a choice: my next turn.
     var onChoice: ((String) -> Void)?
+    /// Paste a draft (#46): (text) → the app does the safe paste.
+    var onPaste: ((String) -> Void)?
+    var draftText: String { state.draft }
+
+    func setDraftTarget(_ app: String) { state.target = app }
+    func setNote(_ s: String) { state.note = s; layout() }
 
     init(anchor: NSWindow) {
         self.anchor = anchor
@@ -169,8 +196,10 @@ final class PanelWindow {
 
     func show(_ c: PanelContent) {
         content = c
-        state.sortColumn = nil; state.ascending = true; state.copied = false
+        state.sortColumn = nil; state.ascending = true; state.copied = false; state.note = ""
+        if c.kind == .draft { state.draft = c.body }
         layout()
+        if c.kind == .draft { panel.makeKey() }          // so I can edit it
     }
 
     func dismiss(_ id: String) { if content?.id == id { close() } }
@@ -191,6 +220,7 @@ final class PanelWindow {
                 .fixedSize(horizontal: false, vertical: true))
             bodyHeight = min(PanelView.maxHeight, probe.fittingSize.height + 4)
         case .choices: bodyHeight = 0
+        case .draft: bodyHeight = min(260, max(90, CGFloat(c.body.split(separator: "\n", omittingEmptySubsequences: false).count) * 20 + 30))
         }
         let view = PanelView(content: c, state: state, height: bodyHeight,
                              onClose: { [weak self] in self?.close() },
@@ -198,9 +228,14 @@ final class PanelWindow {
                              onCopy: { [weak self] in
                                  guard let self, let c = self.content else { return }
                                  NSPasteboard.general.clearContents()
-                                 NSPasteboard.general.setString(c.tsv, forType: .string)
+                                 NSPasteboard.general.setString(c.kind == .draft ? self.state.draft : c.tsv, forType: .string)
                                  self.state.copied = true
-                             })
+                             },
+                             onPaste: { [weak self] in
+                                 guard let self else { return }
+                                 self.onPaste?(self.state.draft)
+                             },
+                             onDiscard: { [weak self] in self?.close() })
         let size = NSHostingView(rootView: view).fittingSize
         host.rootView = view
         // Beside the character: to its left (or right, near the left edge), bottom-aligned, kept on screen.

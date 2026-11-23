@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable
 Send = Callable[..., Awaitable[None]]
 
 SERVER = "ui"
-TOOLS = ("show_card", "show_table", "show_choices", "dismiss")
+TOOLS = ("show_card", "show_table", "show_choices", "show_draft", "dismiss")
 EXACT_NAMES = frozenset(f"mcp__{SERVER}__{t}" for t in TOOLS)
 
 MAX_TITLE, MAX_BODY, MAX_CELL = 120, 8000, 300
@@ -68,6 +68,10 @@ def choices(args: dict) -> dict:
             "options": [_text(o, MAX_TITLE, "option") for o in opts]}
 
 
+def draft(args: dict) -> dict:
+    return {"title": _text(args.get("title") or "Draft", MAX_TITLE, "title"), "text": _text(args.get("text"), MAX_BODY, "text")}
+
+
 def _ok(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}]}
 
@@ -96,6 +100,8 @@ class UI:
                 return await self.show("table", table(args))
             if tool == "show_choices":
                 return await self.show("choices", choices(args))
+            if tool == "show_draft":
+                return await self.show("draft", draft(args))
             if tool == "dismiss":
                 pid = args.get("id") or (self.open[-1] if self.open else None)
                 if pid:
@@ -122,6 +128,9 @@ class UI:
             "show_choices": ("Show clickable choices; the user's click comes back as their next message.",
                              {"type": "object", "properties": {"prompt": str_, "options": {"type": "array", "items": str_}},
                               "required": ["prompt", "options"]}),
+            "show_draft": ("Show a draft the user can edit and paste into the app they're in (never sent). Use for "
+                           "'draft a reply', 'write a message', 'dictate'.",
+                           {"type": "object", "properties": {"title": str_, "text": str_}, "required": ["text"]}),
             "dismiss": ("Close a panel (the latest one if no id is given).",
                         {"type": "object", "properties": {"id": str_}}),
         }

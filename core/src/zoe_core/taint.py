@@ -61,6 +61,9 @@ class Taint:
         """A tool is about to run: if its result is untrusted content, the session is tainted from now on."""
         if tool.startswith("mcp__ui__"):      # Zoe's own panels read nothing
             return
+        if tool.startswith("mcp__context__"):  # the screen is untrusted (#42)
+            self.mark("your screen")
+            return
         if tool in WEB:
             self.mark("the web")
         elif src := connector_source(tool):

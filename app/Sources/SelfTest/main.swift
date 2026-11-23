@@ -171,6 +171,18 @@ do {
     check("speech after the prompt counts", VoiceAnswer.accepted(speechStart: 10.3, promptEnd: 10))
 }
 
+// MARK: screen words (#42)
+print("Screen words")
+do {
+    let yes = ["What's this error?", "summarise that", "what's on my screen", "explain the selected text", "fix this",
+               "what does this mean", "translate the highlighted part", "is this right?", "reply to this email",
+               "what's wrong with this code", "read me that message", "why is this test failing"]
+    let no = ["What's on my calendar this afternoon?", "remind me about that meeting tomorrow", "how was this week",
+              "what's the weather", "anything this weekend?", "in this project, run the tests", "did that deploy finish"]
+    check("requests about the screen", yes.allSatisfy(ScreenWords.mentionsScreen), "\(yes.filter { !ScreenWords.mentionsScreen($0) })")
+    check("time phrases and others don't count", !no.contains(where: ScreenWords.mentionsScreen), "\(no.filter(ScreenWords.mentionsScreen))")
+}
+
 // MARK: echo filter
 print("Echo filter")
 do {

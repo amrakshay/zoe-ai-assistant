@@ -120,6 +120,7 @@ def paths_in(tool_input: dict) -> list[str]:
 
 # Zoe's own in-process tools (they only display things): allowed by exact name.
 from .ui import EXACT_NAMES as UI_TOOLS  # noqa: E402
+from .context import EXACT_NAMES as CONTEXT_TOOLS  # noqa: E402
 
 
 def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
@@ -140,6 +141,8 @@ def decide(tool_name: object, tool_input: dict | None = None) -> Decision:
         return Decision(Policy.ALLOW, "session plumbing")
     if tool_name in UI_TOOLS:
         return Decision(Policy.ALLOW, "draws a panel")
+    if tool_name in CONTEXT_TOOLS:
+        return Decision(Policy.ALLOW, "reads the screen (and taints the session)")
     if tool_name in CLICK_ONLY or _DESTRUCTIVE.search(tool_name.split("__")[-1]):
         return Decision(Policy.CLICK, "runs a command or deletes something: needs a click")
     if tool_name in BUILTIN_EDIT:

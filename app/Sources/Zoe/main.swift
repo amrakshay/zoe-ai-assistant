@@ -125,6 +125,27 @@ if let i = args.firstIndex(of: "--smoke") {
     exit(ok ? 0 : 1)
 }
 
+// MARK: - context probe
+
+if args.contains("--context-probe") {
+    // Prints what Zoe can read from the frontmost app every 3 s (#42): switch apps and select text to test.
+    // Text is cut to 40 characters; nothing is stored.
+    print("Accessibility trusted: \(Hotkey.accessibilityTrusted). Switch apps and select text; Ctrl-C to stop.")
+    let copy = args.contains("--copy")
+    Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+        MainActor.assumeIsolated {
+            let t0 = Date()
+            let s = ScreenContext.snapshot(copyIfNeeded: copy)
+            let ms = Date().timeIntervalSince(t0) * 1000
+            let sel = s.selection.isEmpty ? "-" : "\(s.selection.count) chars via \(s.selectionVia): \"\(s.selection.prefix(40).replacingOccurrences(of: "\n", with: " "))…\""
+            print(String(format: "%@ | window: %@ | url: %@ | selection: %@ | %.0f ms", s.app, String(s.window.prefix(40)),
+                         s.url.isEmpty ? "-" : String(s.url.prefix(60)), sel, ms))
+        }
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.run()
+}
+
 // MARK: - speech-to-text bench
 
 if let i = args.firstIndex(of: "--stt-bench") {
@@ -457,7 +478,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print(String(format: "transcript (%.0f ms): %@", ms, text))
             self.counter += 1
             self.current = "u\(self.counter)"
-            self.link.send(CoreMessage("utterance", ["id": self.current!, "text": text, "trigger": "ptt"]))
+            var msg: [String: Any] = ["id": self.current!, "text": text, "trigger": "ptt"]
+            if let ctx = self.screenContext(for: text, allowCopy: true) { msg["context"] = ctx }
+            self.link.send(CoreMessage("utterance", msg))
             self.voice.turnSent()
         }
         voice.onListeningStarted = { [weak self] in self?.link.send(CoreMessage("listening")) }
@@ -493,6 +516,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// A screen snapshot for a request that points at the screen ("this", "here", "on screen"), else nil (#42).
+    private func screenContext(for text: String, allowCopy: Bool) -> [String: Any]? {
+        guard ScreenWords.mentionsScreen(text) else { bubble.setSeen(""); return nil }
+        let s = ScreenContext.snapshot(copyIfNeeded: allowCopy)
+        guard !s.app.isEmpty else { bubble.setSeen(""); return nil }
+        bubble.setSeen(seenLine(s))
+        return s.dictionary
+    }
+
+    private func seenLine(_ s: ScreenSnapshot) -> String {
+        var parts = ["read from \(s.app)"]
+        if !s.window.isEmpty { parts.append(String(s.window.prefix(40))) }
+        if !s.selection.isEmpty { parts.append("\(s.selection.count) selected characters") }
+        return parts.joined(separator: " — ")
+    }
+
     /// Quiet mode (#36): no speech at all, everything on screen; remembered across restarts.
     private func setQuiet(_ on: Bool) {
         voice.quiet = on
@@ -511,7 +550,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         counter += 1
         current = "u\(counter)"
         bubble.showYou(t)
-        link.send(CoreMessage("utterance", ["id": current!, "text": t, "trigger": trigger]))
+        var msg: [String: Any] = ["id": current!, "text": t, "trigger": trigger]
+        // Typed: Accessibility only (Zoe's own text box has the keyboard, so ⌘C would copy from Zoe).
+        if let ctx = screenContext(for: t, allowCopy: false) { msg["context"] = ctx }
+        link.send(CoreMessage("utterance", msg))
         voice.typedTurnSent()
     }
 
@@ -612,6 +654,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "context_request":           // Claude asked for the screen (get_frontmost, #42)
+            let s = ScreenContext.snapshot(copyIfNeeded: false)
+            bubble.setSeen(s.app.isEmpty ? "" : seenLine(s))
+            var f = s.dictionary
+            f["id"] = m.string("id") ?? ""
+            link.send(CoreMessage("context_snapshot", f))
         case "mode":
             setQuiet(m.string("value") == "quiet")
         case "sessions_activity":

@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 from .policy import Decision, Policy
 
-EGRESS = frozenset({"WebFetch", "WebSearch"})
+EGRESS = frozenset({"WebFetch", "WebSearch", "mcp__mac__open_url"})
 WEB = frozenset({"WebFetch", "WebSearch"})
 
 _DOMAIN = re.compile(r"\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})\b", re.IGNORECASE)
@@ -61,6 +61,14 @@ class Taint:
         """A tool is about to run: if its result is untrusted content, the session is tainted from now on."""
         if tool.startswith("mcp__ui__"):      # Zoe's own panels read nothing
             return
+        if tool.startswith("mcp__context__"):  # the screen is untrusted (#42)
+            self.mark("your screen")
+            return
+        if tool == "mcp__mac__get_clipboard":   # so is the clipboard (#45)
+            self.mark("your clipboard")
+            return
+        if tool.startswith(("mcp__mac__", "mcp__capture__")):   # other Mac actions and capture read nothing in
+            return
         if tool in WEB:
             self.mark("the web")
         elif src := connector_source(tool):
@@ -70,7 +78,11 @@ class Taint:
         return bool(host) and any(host == d or host.endswith("." + d) for d in self.user_domains)
 
     def adjust(self, tool: str, tool_input: dict, d: Decision) -> Decision:
-        """Make an egress ALLOW into ASK when tainted, unless I named the domain myself."""
+        """Make egress stricter when tainted: web reads ALLOW → ASK (unless I named the domain myself);
+        opening a URL ASK → CLICK (#45)."""
+        if self.tainted and tool == "mcp__mac__open_url" and d.policy is Policy.ASK:
+            return Decision(Policy.CLICK, f"this conversation has read outside content ({', '.join(sorted(self.sources))}), "
+                                          "so opening a web page needs a click")
         if not self.tainted or tool not in EGRESS or d.policy is not Policy.ALLOW:
             return d
         if tool == "WebFetch" and self.user_named(host_of(str(tool_input.get("url", "")))):

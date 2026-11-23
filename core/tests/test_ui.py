@@ -76,3 +76,11 @@ def test_dismiss_latest_or_by_id():
 
 def test_server_builds():
     assert UI(Wire()).server() is not None
+
+
+def test_show_draft():
+    w = Wire()
+    ui = UI(w)
+    run(ui, "show_draft", {"text": "Thanks, looks good!\n"})
+    assert w.sent[-1][1]["kind"] == "draft" and w.sent[-1][1]["payload"]["text"] == "Thanks, looks good!\n"
+    assert run(ui, "show_draft", {"text": ""}).get("is_error")

@@ -48,6 +48,15 @@ class Core:
         elif t == "take_back":
             if self.brain:
                 self.brain.take_back()
+        elif t == "reminder_result":
+            if self.brain:
+                self.brain.capture.reminder_done(msg)
+        elif t == "screenshot_result":
+            if self.brain:
+                self.brain.context.screenshot_done(msg)
+        elif t == "context_snapshot":
+            if self.brain:
+                self.brain.context.snapshot(msg)
         elif t == "answer":
             if not (self.brain and self.brain.approvals.answer(msg)):
                 await self.send("error", message=f"answer for unknown or finished request: {msg.get('pending_id')}")
@@ -89,7 +98,9 @@ class Core:
         text = str(msg.get("text", ""))
         uid = msg.get("id")
         if self.brain:
-            self.brain.handle(uid, text)
+            ctx = msg.get("context") if isinstance(msg.get("context"), dict) else None
+            drop = msg.get("dropped") if isinstance(msg.get("dropped"), dict) else None
+            self.brain.handle(uid, text, ctx, drop)
             return
         await self.send("state", value="thinking")
         await self.send("say", utterance_id=uid, text=f"You said: {text}", final=True)

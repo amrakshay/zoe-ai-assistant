@@ -125,6 +125,27 @@ if let i = args.firstIndex(of: "--smoke") {
     exit(ok ? 0 : 1)
 }
 
+// MARK: - context probe
+
+if args.contains("--context-probe") {
+    // Prints what Zoe can read from the frontmost app every 3 s (#42): switch apps and select text to test.
+    // Text is cut to 40 characters; nothing is stored.
+    print("Accessibility trusted: \(Hotkey.accessibilityTrusted). Switch apps and select text; Ctrl-C to stop.")
+    let copy = args.contains("--copy")
+    Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+        MainActor.assumeIsolated {
+            let t0 = Date()
+            let s = ScreenContext.snapshot(copyIfNeeded: copy)
+            let ms = Date().timeIntervalSince(t0) * 1000
+            let sel = s.selection.isEmpty ? "-" : "\(s.selection.count) chars via \(s.selectionVia): \"\(s.selection.prefix(40).replacingOccurrences(of: "\n", with: " "))…\""
+            print(String(format: "%@ | window: %@ | url: %@ | selection: %@ | %.0f ms", s.app, String(s.window.prefix(40)),
+                         s.url.isEmpty ? "-" : String(s.url.prefix(60)), sel, ms))
+        }
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.run()
+}
+
 // MARK: - speech-to-text bench
 
 if let i = args.firstIndex(of: "--stt-bench") {
@@ -348,6 +369,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let takeBackItem = NSMenuItem(title: "Take Back from Terminal", action: #selector(takeBack), keyEquivalent: "")
     private var handedOff = false
     private let typeHotkey = Hotkey(kind: .typeShortcut)
+    private var droppedItem: [String: Any]?       // the next request carries it (#44)
+    private var draftTarget: SafePaste.Target?    // the app and field I was in when I asked (#46)
+    private var pasteConfirmPID: pid_t?           // a second click pastes into a different front app
     private let recentItem = NSMenuItem(title: "Recent Sessions", action: nil, keyEquivalent: "")
     private let quietItem = NSMenuItem(title: "Quiet Mode", action: #selector(toggleQuiet), keyEquivalent: "")
     private static let quietKey = "quietMode"
@@ -415,7 +439,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         bubble.onHandOff = { [weak self] in self?.openConversationInTerminal() }
         panels.onChoice = { [weak self] choice in self?.sendTyped(choice, trigger: "click") }
+        panels.onPaste = { [weak self] text in self?.pasteDraft(text) }
         bubble.onTyped = { [weak self] text in self?.sendTyped(text, trigger: "text") }
+        character.onDrop = { [weak self] kind, value in
+            guard let self else { return }
+            self.droppedItem = ["kind": kind, "value": value]
+            let name = kind == "file" ? (value as NSString).lastPathComponent : kind == "url" ? (URL(string: value)?.host ?? value) : "some text"
+            self.bubble.setSeen("dropped: \(name) — what should I do with it?")
+            self.bubble.openTyping()
+        }
         typeHotkey.onSignal = { sig in
             if sig == .down { Task { @MainActor [weak self] in self?.typeToZoe() } }
         }
@@ -457,7 +489,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print(String(format: "transcript (%.0f ms): %@", ms, text))
             self.counter += 1
             self.current = "u\(self.counter)"
-            self.link.send(CoreMessage("utterance", ["id": self.current!, "text": text, "trigger": "ptt"]))
+            self.draftTarget = SafePaste.Target.current() ?? self.draftTarget
+            var msg: [String: Any] = ["id": self.current!, "text": text, "trigger": "ptt"]
+            if let ctx = self.screenContext(for: text, allowCopy: true) { msg["context"] = ctx }
+            if let d = self.droppedItem { msg["dropped"] = d; self.droppedItem = nil }
+            self.link.send(CoreMessage("utterance", msg))
             self.voice.turnSent()
         }
         voice.onListeningStarted = { [weak self] in self?.link.send(CoreMessage("listening")) }
@@ -493,6 +529,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Safe paste of a draft (#46): same app and field as when I asked (or a second click to paste into the new
+    /// front app), trailing newlines stripped, never several lines into a terminal, ⌘V, clipboard restored.
+    /// It never presses Send or Enter.
+    private func pasteDraft(_ text: String) {
+        guard let now = SafePaste.Target.current() else { panels.setNote("No app to paste into."); return }
+        if let t = draftTarget, !t.stillFrontmost(), pasteConfirmPID != now.pid {
+            pasteConfirmPID = now.pid
+            panels.setNote("The front app is now \(now.app), not \(t.app). Click Paste again to paste there.")
+            return
+        }
+        switch SafePaste.verdict(text: text, bundleID: now.bundleID) {
+        case .refuseMultiline:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(SafePaste.clean(text), forType: .string)
+            panels.setNote("Several lines would each run in \(now.app), so I didn't paste. It's on your clipboard instead.")
+        case .paste(let clean):
+            panels.close()                                   // give the keyboard back to that app first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { SafePaste.paste(clean) }
+            print("[metrics] draft pasted (\(clean.count) characters)")
+        }
+    }
+
+    /// A screen snapshot for a request that points at the screen ("this", "here", "on screen"), else nil (#42).
+    private func screenContext(for text: String, allowCopy: Bool) -> [String: Any]? {
+        guard ScreenWords.mentionsScreen(text) else { bubble.setSeen(""); return nil }
+        let s = ScreenContext.snapshot(copyIfNeeded: allowCopy)
+        guard !s.app.isEmpty else { bubble.setSeen(""); return nil }
+        bubble.setSeen(seenLine(s))
+        return s.dictionary
+    }
+
+    private func seenLine(_ s: ScreenSnapshot) -> String {
+        var parts = ["read from \(s.app)"]
+        if !s.window.isEmpty { parts.append(String(s.window.prefix(40))) }
+        if !s.selection.isEmpty { parts.append("\(s.selection.count) selected characters") }
+        return parts.joined(separator: " — ")
+    }
+
     /// Quiet mode (#36): no speech at all, everything on screen; remembered across restarts.
     private func setQuiet(_ on: Bool) {
         voice.quiet = on
@@ -511,7 +585,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         counter += 1
         current = "u\(counter)"
         bubble.showYou(t)
-        link.send(CoreMessage("utterance", ["id": current!, "text": t, "trigger": trigger]))
+        draftTarget = SafePaste.Target.current() ?? draftTarget
+        var msg: [String: Any] = ["id": current!, "text": t, "trigger": trigger]
+        // Typed: Accessibility only (Zoe's own text box has the keyboard, so ⌘C would copy from Zoe).
+        if let ctx = screenContext(for: t, allowCopy: false) { msg["context"] = ctx }
+        if let d = droppedItem { msg["dropped"] = d; droppedItem = nil; bubble.setSeen("with the dropped item") }
+        link.send(CoreMessage("utterance", msg))
         voice.typedTurnSent()
     }
 
@@ -604,7 +683,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let t = m.string("text"), !t.isEmpty { replyItem.title = t; voice.speak(t); bubble.appendReply(t) }
             if (m["final"] as? Bool) == true { voice.endReply() }
         case "show_panel":
-            if let p = PanelContent(message: m.fields) { panels.show(p) }
+            if let p = PanelContent(message: m.fields) {
+                pasteConfirmPID = nil
+                panels.setDraftTarget(draftTarget?.app ?? "")
+                panels.show(p)
+            }
         case "dismiss_panel" where (m.string("id") ?? "").hasPrefix("panel-"):
             panels.dismiss(m.string("id") ?? "")
         case "open_terminal":
@@ -612,6 +695,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openInTerminal(command: cmd, cwd: m.string("cwd") ?? "")
                 voice.endConversation()
             }
+        case "screenshot_request":        // after my click on the card (#43)
+            let id = m.string("id") ?? ""
+            Task { @MainActor [weak self] in
+                let r = await Screenshot.frontWindow()
+                self?.bubble.setSeen(r.path.isEmpty ? "" : "screenshot of \(r.app) (deleted after this turn)")
+                self?.link.send(CoreMessage("screenshot_result", ["id": id, "path": r.path, "app": r.app, "detail": r.detail]))
+            }
+        case "add_reminder":              // "remind me at 4 to …" (#47)
+            let id = m.string("id") ?? ""
+            let title = m.string("title") ?? "", due = m.string("due") ?? ""
+            Task { @MainActor [weak self] in
+                let r = await Reminders.add(title: title, due: due)
+                self?.link.send(CoreMessage("reminder_result", ["id": id, "ok": r.ok, "detail": r.detail]))
+            }
+        case "context_request":           // Claude asked for the screen (get_frontmost, #42)
+            let s = ScreenContext.snapshot(copyIfNeeded: false)
+            bubble.setSeen(s.app.isEmpty ? "" : seenLine(s))
+            var f = s.dictionary
+            f["id"] = m.string("id") ?? ""
+            link.send(CoreMessage("context_snapshot", f))
         case "mode":
             setQuiet(m.string("value") == "quiet")
         case "sessions_activity":

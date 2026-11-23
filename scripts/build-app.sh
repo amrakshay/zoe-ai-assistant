@@ -49,6 +49,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Zoe listens only while you hold the talk key or are in a conversation. Audio stays on this Mac and is never stored.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Zoe shows live captions of what you say, recognised on this Mac.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>Zoe adds reminders you ask for ("remind me at 4 to …").</string>
+  <key>NSRemindersUsageDescription</key><string>Zoe adds reminders you ask for ("remind me at 4 to …").</string>
 </dict>
 </plist>
 PLIST

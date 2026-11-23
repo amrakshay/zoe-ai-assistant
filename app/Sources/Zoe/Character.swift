@@ -14,6 +14,8 @@ final class CharacterWindow {
     let panel: NSPanel
     let orb: OrbView
     var onClick: (() -> Void)?
+    /// Something dropped on the character (#44): (kind: file|url|text, value).
+    var onDrop: ((String, String) -> Void)?
     /// Called after the panel moved (to re-place the bubble).
     var onMove: (() -> Void)?
 
@@ -34,6 +36,7 @@ final class CharacterWindow {
         panel.contentView = orb
         orb.onClick = { [weak self] in self?.onClick?() }
         orb.onDragged = { [weak self] in self?.savePosition(); self?.onMove?() }
+        orb.onDrop = { [weak self] kind, value in self?.onDrop?(kind, value) }
         panel.setFrameOrigin(Self.savedOrigin() ?? Self.defaultOrigin())
     }
 
@@ -72,6 +75,8 @@ final class CharacterWindow {
 final class OrbView: NSView {
     var onClick: (() -> Void)?
     var onDragged: (() -> Void)?
+    /// Something dropped on the orb (#44): (kind: file|url|text, value).
+    var onDrop: ((String, String) -> Void)?
 
     private let body = CAGradientLayer()
     private let halo = CAShapeLayer()
@@ -154,6 +159,7 @@ final class OrbView: NSView {
         for l in [badge, hand, muted, phones] as [CALayer] { l.opacity = 0; layer?.addSublayer(l) }
 
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        registerForDraggedTypes([.fileURL, .URL, .string])
         apply(.idle)
     }
 
@@ -247,6 +253,25 @@ final class OrbView: NSView {
         if state == .listening { halo.setAffineTransform(CGAffineTransform(scaleX: 1 + 0.18 * k, y: 1 + 0.18 * k)) }
         else { body.setAffineTransform(CGAffineTransform(scaleX: 1 + 0.14 * k, y: 1 + 0.14 * k)) }
         CATransaction.commit()
+    }
+
+    // MARK: drops (#44)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { hovering = true; return .copy }
+    override func draggingExited(_ sender: NSDraggingInfo?) { hovering = false }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        hovering = false
+        let pb = sender.draggingPasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], let f = urls.first {
+            onDrop?("file", f.path); return true            // a path, never an upload
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let u = urls.first,
+           u.scheme == "http" || u.scheme == "https" {
+            onDrop?("url", u.absoluteString); return true
+        }
+        if let s = pb.string(forType: .string), !s.isEmpty { onDrop?("text", String(s.prefix(8000))); return true }
+        return false
     }
 
     // MARK: click and drag

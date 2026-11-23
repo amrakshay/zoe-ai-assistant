@@ -23,6 +23,7 @@ from .approvals import Approvals
 from .names import Names
 from .renderers import render
 from .terminal import TerminalHandoff
+from .context import DROP_SOURCE, Context, SOURCE as SCREEN, describe_drop, with_context
 from .ui import UI
 from .gate import Gate
 from .policy import ENABLED_BUILTINS
@@ -53,6 +54,10 @@ You are Zoe, a voice assistant on the user's Mac. Your reply is spoken aloud, th
 - The user's words come from speech-to-text, which can mishear short technical words ("ls" as "is"). If a
   request to run, change or send something is unclear or doesn't quite make sense, say what you understood in
   one sentence and ask before doing anything; don't go exploring to guess.
+- "Note this", "todo: …" and "remind me at 4 to …": use mcp__capture__add_note, add_todo or remind_me
+  (give remind_me a local date-time like 2026-11-23T16:00).
+- To draft a reply or message ("draft a reply to this", "write…", "dictate…"), put the text in
+  mcp__ui__show_draft and say one short sentence; never send it yourself.
 - For more than about three items, tables, code or links, draw instead of talking: mcp__ui__show_table or
   mcp__ui__show_card, then say one short sentence. Offer choices with mcp__ui__show_choices.
 - Before sending to a Slack user or channel by ID, look it up first (slack_read_user_profile with its user_id,
@@ -125,6 +130,10 @@ class Brain:
         self.handoff = TerminalHandoff(send, session_id=lambda: self.session_id, names=self.names)
         self.ui = UI(send, session_id=lambda: self.session_id)
         self._ui_server = None
+        self.context = Context(send)
+        from .capture import Capture
+        self.capture = Capture(send)
+        self._context_server = None
         self.sessions: list[Session] = []
         self.active = self.new_session(home())
         self._sweeper: asyncio.Task | None = None
@@ -376,11 +385,28 @@ class Brain:
                    "PostToolUse": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)],
                    "PostToolUseFailure": [HookMatcher(matcher=None, hooks=[self.handoff.post_tool_use], timeout=10)]},
             can_use_tool=can_use_tool,
-            mcp_servers={"ui": self.ui_server()},
+            mcp_servers={"ui": self.ui_server(), "context": self.context_server(), "mac": self.mac_server(),
+                         "capture": self.capture_server()},
             include_partial_messages=True,
             resume=s.session_id,
             fork_session=bool(s.fork_next and s.session_id),
         )
+
+    def capture_server(self):
+        if getattr(self, "_capture_server", None) is None:
+            self._capture_server = self.capture.server()
+        return self._capture_server
+
+    def mac_server(self):
+        if getattr(self, "_mac_server", None) is None:
+            from .mac import server
+            self._mac_server = server()
+        return self._mac_server
+
+    def context_server(self):
+        if self._context_server is None:
+            self._context_server = self.context.server(on_read=lambda: self.gate.taint.mark(SCREEN))
+        return self._context_server
 
     def ui_server(self):
         if self._ui_server is None:
@@ -423,11 +449,12 @@ class Brain:
             self._connecting = None  # let the next turn retry
             raise
 
-    def handle(self, utterance_id: Any, text: str) -> None:
-        """Start a turn; a new utterance interrupts the one still running."""
+    def handle(self, utterance_id: Any, text: str, context: dict | None = None, dropped: dict | None = None) -> None:
+        """Start a turn; a new utterance interrupts the one still running. `context`: a screen snapshot the app
+        attached because I said "this" / "here" / "on screen" (#42)."""
         if self._turn and not self._turn.done():
             self._turn.cancel()
-        self._turn = asyncio.create_task(self._run(utterance_id, text))
+        self._turn = asyncio.create_task(self._run(utterance_id, text, context, dropped))
 
     async def interrupt(self) -> None:
         self.approvals.cancel_all("interrupt")   # hooks wait in the SDK's task, not the turn's
@@ -450,7 +477,7 @@ class Brain:
         await self.send("say", utterance_id=uid, text="", final=True)
         await self.send("state", value="idle")
 
-    async def _run(self, uid: Any, text: str) -> None:
+    async def _run(self, uid: Any, text: str, context: dict | None = None, dropped: dict | None = None) -> None:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
         from claude_agent_sdk.types import StreamEvent
 
@@ -467,6 +494,13 @@ class Brain:
             return
         await self.choose(text)
         self.gate.taint.user_said(text)          # the chosen session's gate (#18, #26)
+        prompt = text
+        if context:
+            self.gate.taint.mark(SCREEN)         # screen text is untrusted (#42)
+            prompt = with_context(text, context)
+        if dropped and (d := describe_drop(dropped)):
+            self.gate.taint.mark(DROP_SOURCE)    # a dropped item is untrusted (#44)
+            prompt = f"{prompt}\n\n{d}"
         t0 = time.monotonic()
         first = None
         splitter = SentenceSplitter()
@@ -489,7 +523,7 @@ class Brain:
             self.index.set_status(self.session_id, "running")
         try:
             await self.ready()
-            await self.client.query(text)
+            await self.client.query(prompt)
             async for m in self.client.receive_response():
                 if isinstance(m, StreamEvent):
                     ev = m.event
@@ -549,6 +583,8 @@ class Brain:
             await self.send("say", utterance_id=uid, text="Sorry, I couldn't reach Claude just now.", final=True)
             await self.send("error", message=f"brain: {e}")
         finally:
+            if self.context.cleanup():                # screenshots never outlive their turn (#43)
+                log("deleted this turn's screenshots")
             await self.send("state", value="idle")
 
     async def close(self) -> None:

@@ -6,6 +6,7 @@ import SwiftUI
 /// A plain value, so the panel can be measured synchronously from a fresh view.
 struct BubbleContent: Equatable {
     var place = ""            // the session's repo or folder when it isn't home (#30)
+    var seen = ""             // what Zoe read from the screen for this turn (#42)
     var you = ""
     var reply = ""
     var card = false          // full reply in a scrollable card
@@ -147,6 +148,9 @@ struct BubbleView: View {
         VStack(alignment: .leading, spacing: 6) {
             if !model.place.isEmpty && !(model.you.isEmpty && model.reply.isEmpty) {
                 Label("in \(model.place)", systemImage: "folder").font(.caption).foregroundStyle(.secondary)
+            }
+            if !model.seen.isEmpty {
+                Label(model.seen, systemImage: "eye").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             if !model.you.isEmpty {
                 Text(model.you)
@@ -370,6 +374,12 @@ final class BubbleWindow {
         hideTask?.cancel()
         model = BubbleContent(place: model.place, you: text, approvals: model.approvals, questions: model.questions, terminals: model.terminals)
         relayout()
+    }
+
+    /// What Zoe read from the screen for this turn (#42).
+    func setSeen(_ text: String) {
+        model.seen = text
+        if !model.isEmpty { relayout() }
     }
 
     /// Where Zoe is working (#30): a repo or folder name, or "" for home.

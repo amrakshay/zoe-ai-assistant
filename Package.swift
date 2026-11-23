@@ -8,6 +8,8 @@ let package = Package(
     products: [
         .executable(name: "Zoe", targets: ["Zoe"]),
         .executable(name: "zoe-selftest", targets: ["SelfTest"]),
+        // Whisper in its own process (#41); bundled next to the app's executable.
+        .executable(name: "zoe-stt", targets: ["ZoeSTT"]),
     ],
     dependencies: [
         // ONNX Runtime (MIT) for Silero VAD; same package and version as the F05 wake-word spike.
@@ -19,12 +21,17 @@ let package = Package(
     targets: [
         // UI-free logic: core link, framing, supervision. Everything here is testable from the self-test.
         .target(name: "ZoeKit",
-                dependencies: [.product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
-                               .product(name: "WhisperKit", package: "argmax-oss-swift")],
+                dependencies: [.product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"), "STTWire"],
                 path: "app/Sources/ZoeKit"),
+        // The app ↔ zoe-stt protocol. Tiny and stable: the helper depends only on this and WhisperKit, so
+        // app changes don't rebuild it (and don't make Core ML recompile Whisper for the Neural Engine).
+        .target(name: "STTWire", path: "app/Sources/STTWire"),
+        .executableTarget(name: "ZoeSTT",
+                          dependencies: ["STTWire", .product(name: "WhisperKit", package: "argmax-oss-swift")],
+                          path: "app/Sources/ZoeSTT"),
         // The menu-bar app.
         .executableTarget(name: "Zoe", dependencies: ["ZoeKit"], path: "app/Sources/Zoe"),
         // Plain-executable test suite (Swift Testing / XCTest aren't available with the Command Line Tools).
-        .executableTarget(name: "SelfTest", dependencies: ["ZoeKit"], path: "app/Sources/SelfTest"),
+        .executableTarget(name: "SelfTest", dependencies: ["ZoeKit", "STTWire"], path: "app/Sources/SelfTest"),
     ]
 )

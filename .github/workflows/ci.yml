@@ -49,6 +49,12 @@ jobs:
           echo "$out"
           echo "$out" | grep -q '"You said: bundle"'
           codesign --verify --deep --strict dist/Zoe.app   # the core must not write into the bundle
+      - name: Bundled Whisper helper answers (no model needed)
+        run: |
+          out=$(printf '%s\n' '{"op":"stats"}' | dist/Zoe.app/Contents/MacOS/zoe-stt --models "$RUNNER_TEMP/zoe-models")
+          echo "$out"
+          echo "$out" | grep -q '"event":"stats"'
+          codesign --verify --strict dist/Zoe.app/Contents/MacOS/zoe-stt
       - name: Lint Homebrew cask
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"

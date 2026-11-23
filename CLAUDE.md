@@ -18,7 +18,7 @@ Zoe is a macOS voice assistant that does its work through Claude Code:
 | `feasibility/` | Phase 0 reports (`F01`–`F07`), summary, and spike code under `spikes/` |
 | `mock/` | Interactive HTML mock of the flows |
 | `scripts/ci-checks.sh` | Repo checks run by CI (privacy, syntax, version) |
-| `Package.swift`, `app/Sources/` | Swift: `ZoeKit` (UI-free logic: JSON-lines framing, core supervision), `Zoe` (menu-bar app), `SelfTest` (`zoe-selftest`) |
+| `Package.swift`, `app/Sources/` | Swift: `ZoeKit` (UI-free logic: JSON-lines framing, core supervision), `Zoe` (menu-bar app), `ZoeSTT` (`zoe-stt`, the Whisper helper process) with its protocol in `STTWire`, `SelfTest` (`zoe-selftest`) |
 | `core/` | Python core (uv): `src/zoe_core/` (`main.py` stdio loop, `protocol.py`), `tests/` (pytest) |
 
 ## Commands
@@ -37,6 +37,7 @@ swift run Zoe --smoke "hello"
 
 - App bundle: `./scripts/build-app.sh && ./scripts/package-release.sh && ./scripts/check-version.sh`. Resource use while Zoe runs: `python3 scripts/measure.py`. Without speaking: `swift run Zoe --ui-demo`, `--speak-test`, `--stt-bench <wav>`, `--listen-test N`.
 - Run the self-test and the core tests after any change; the self-test must print `ALL CHECKS PASSED`.
+- Whisper runs in `zoe-stt`, found next to the app's executable: use `swift build` (not only `swift run Zoe`) so it exists. Keep it depending only on `STTWire` and WhisperKit, so app rebuilds don't make Core ML recompile Whisper (~2 min). Memory budgets count app + helper.
 - The core writes protocol messages only to stdout; logs go to stderr.
 
 ## Rules that must not regress

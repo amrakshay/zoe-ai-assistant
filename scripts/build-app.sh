@@ -2,6 +2,7 @@
 # Builds dist/Zoe.app (release) and signs it.
 #   Version:  CFBundleShortVersionString from version.txt (managed by release-please);
 #             CFBundleVersion from $ZOE_BUILD_NUMBER, else the git commit count.
+#   Whisper:  the zoe-stt helper (#41) goes next to the app's executable in Contents/MacOS and is signed first.
 #   Core:     the Python core's source goes into Contents/Resources/core; on launch, core/launch.sh syncs its
 #             environment with uv into ~/Library/Application Support/Zoe/core-venv (so the cask needs uv).
 #   Signing:  ad-hoc by default (releases are free and not notarized). Set $ZOE_SIGN_IDENTITY to a local
@@ -9,12 +10,14 @@
 set -eu
 cd "$(dirname "$0")/.."
 swift build -c release --product Zoe
+swift build -c release --product zoe-stt
 VERSION=$(tr -d '[:space:]' < version.txt)
 BUILD=${ZOE_BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}
 APP=dist/Zoe.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/core"
 cp .build/release/Zoe "$APP/Contents/MacOS/Zoe"
+cp .build/release/zoe-stt "$APP/Contents/MacOS/zoe-stt"
 
 # The core: source, lock file and launcher only (no venv, tests or caches).
 cp core/pyproject.toml core/uv.lock core/launch.sh "$APP/Contents/Resources/core/"
@@ -55,6 +58,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 IDENTITY="${ZOE_SIGN_IDENTITY:--}"
+codesign --force --sign "$IDENTITY" --timestamp=none --identifier io.github.amrakshay.zoe.stt "$APP/Contents/MacOS/zoe-stt"
 codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
 echo "Built $APP $VERSION ($BUILD), signed with: $IDENTITY"
-ls -lh "$APP/Contents/MacOS/Zoe" | awk '{print "binary size:", $5}'
+ls -lh "$APP/Contents/MacOS/Zoe" "$APP/Contents/MacOS/zoe-stt" | awk '{print "binary size:", $5, $9}'

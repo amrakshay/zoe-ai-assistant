@@ -46,7 +46,7 @@ final class VoiceController {
     /// A spoken answer to Claude's question: (pending id, question text, chosen label(s) or what I said).
     var onQuestionAnswer: ((String, String, String) -> Void)?
     private var unloadTask: Task<Void, Never>?
-    /// Unload Whisper this long after a conversation ends (keeps ~185 MB out of the idle app).
+    /// Unload Whisper this long after a conversation ends: its helper process exits, freeing ~185 MB.
     var unloadAfter: Duration = .seconds(120)
 
     private var machine = TurnMachine()

@@ -1,7 +1,14 @@
 // zoe-selftest: plain-executable test suite (Swift Testing / XCTest need full Xcode).
 // Prints one line per check and `ALL CHECKS PASSED` at the end; exits 1 on any failure.
 import Foundation
+import STTWire
 import ZoeKit
+
+final class ProgressBox: @unchecked Sendable {
+    private let lock = NSLock(); private var v: [Double] = []
+    func add(_ p: Double) { lock.withLock { v.append(p) } }
+    var values: [Double] { lock.withLock { v } }
+}
 
 setvbuf(stdout, nil, _IOLBF, 0)
 nonisolated(unsafe) var failures = 0
@@ -302,6 +309,104 @@ check("restart counted", link.restarts == 1)
 
 link.stop()
 check("stop ends in .stopped, no restart", waitFor(3) { box.lock.withLock { box.states.last == .stopped } } && readyCount() == 2)
+
+// MARK: speech-to-text helper (#41)
+print("Whisper helper protocol and client (fake helper; the real one needs the model)")
+do {
+    let samples: [Float] = [0.25, -1.5, 3e-7, .pi]
+    let frame = STTWire.transcribeFrame(samples)
+    let nl = frame.firstIndex(of: 0x0A)!
+    check("transcribe frame: header line, then 4 bytes per sample",
+          STTWire.decode(STTWire.Request.self, frame[..<nl]) == STTWire.Request(op: "transcribe", samples: 4)
+          && frame.count == nl + 1 + 16)
+    check("samples round-trip exactly", STTWire.samples(from: frame[(nl + 1)...]) == samples)
+    check("empty turn is a valid frame", STTWire.samples(from: Data()) == [])
+    let r = STTWire.Reply(event: "text", text: "two\nlines", millis: 480)
+    let line = STTWire.line(r)
+    check("reply is exactly one line", line.filter { $0 == 0x0A }.count == 1 && STTWire.decode(STTWire.Reply.self, line.dropLast()) == r)
+
+    // Frames split across pipe writes: lines and exact-size reads still line up.
+    var fds: [Int32] = [0, 0]
+    _ = pipe(&fds)
+    let reader = FDReader(fd: fds[0])
+    let w = fds[1]
+    Thread.detachNewThread {
+        for chunk in [frame.prefix(5), frame.dropFirst(5).prefix(nl), frame.dropFirst(5 + nl)] { writeAll(w, Data(chunk)); usleep(2000) }
+        writeAll(w, STTWire.line(STTWire.Request(op: "load")))
+        close(w)
+    }
+    let h = reader.readLine().flatMap { STTWire.decode(STTWire.Request.self, $0) }
+    let body = reader.read(exactly: (h?.samples ?? 0) * 4)
+    check("reader reassembles a split frame", body.map(STTWire.samples(from:)) == samples)
+    check("next request follows", reader.readLine().flatMap { STTWire.decode(STTWire.Request.self, $0) }?.op == "load")
+    check("end of stream is nil", reader.readLine() == nil && reader.read(exactly: 1) == nil)
+    close(fds[0])
+
+    func blocking<T: Sendable>(_ f: @escaping @Sendable () async throws -> T) -> Result<T, Error> {
+        nonisolated(unsafe) var r: Result<T, Error>!
+        let s = DispatchSemaphore(value: 0)
+        Task.detached { do { r = .success(try await f()) } catch { r = .failure(error) }; s.signal() }
+        s.wait(); return r
+    }
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("zoe-stt-selftest-\(getpid())")
+    try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    // A fake zoe-stt: same protocol, no Whisper. A first sample of -1 makes it crash; 2 makes it "hear"
+    // Whisper's stock silence phrase.
+    let fake = tmp.appendingPathComponent("fake-zoe-stt")
+    try! """
+    #!/usr/bin/env python3
+    import json, os, struct, sys
+    inp, out = sys.stdin.buffer, sys.stdout.buffer
+    while True:
+        line = inp.readline()
+        if not line:
+            break
+        req = json.loads(line)
+        if req["op"] == "load":
+            out.write(b'{"event":"progress","progress":0.5}\\n{"event":"loaded","millis":7}\\n')
+        elif req["op"] == "transcribe":
+            n = req["samples"]
+            vals = struct.unpack("<%df" % n, inp.read(n * 4))
+            if n and vals[0] == -1:
+                os._exit(1)
+            text = "Thank you." if n and vals[0] == 2 else "heard %d samples" % n
+            out.write((json.dumps({"event": "text", "text": text, "millis": 1}) + "\\n").encode())
+        elif req["op"] == "stats":
+            out.write(b'{"event":"stats","footprintMB":12,"maxRSSMB":13}\\n')
+        else:
+            out.write(b'{"event":"error","error":"unknown op"}\\n')
+        out.flush()
+    """.write(to: fake, atomically: true, encoding: .utf8)
+    chmod(fake.path, 0o755)
+
+    let stt = WhisperSTT(modelsDirectory: tmp, helperURL: fake)
+    let progress = ProgressBox()
+    let loaded = blocking { try await stt.load { p in progress.add(p) }; return await stt.helperPID }
+    let pid1 = (try? loaded.get()) ?? nil
+    check("load starts the helper and reports progress", pid1 != nil && progress.values == [0.5], "\(loaded)")
+    check("load is idempotent (same helper)", (try? blocking { try await stt.load(); return await stt.helperPID }.get()) == pid1)
+    let t = blocking { try await stt.transcribe([Float](repeating: 0.1, count: 16000)) }
+    check("transcribe goes through the helper", (try? t.get().text) == "heard 16000 samples", "\(t)")
+    check("stock silence phrase is dropped", (try? blocking { try await stt.transcribe([2, 0]) }.get().text) == "")
+    let mem: Double? = (try? blocking { await stt.helperMemory()?.footprintMB }.get()) ?? nil
+    check("helper reports its memory", mem == 12)
+    let crash = blocking { try await stt.transcribe([-1, 0, 0]) }
+    var died = false
+    if case .failure(STTError.helperExited) = crash { died = true }
+    check("a helper that dies is an error, not a crash of the app", died, "\(crash)")
+    let again = blocking { try await stt.transcribe([0.5]) }
+    check("the next turn starts a new helper", (try? again.get().text) == "heard 1 samples", "\(again)")
+    let pid2 = (try? blocking { await stt.helperPID }.get()) ?? nil
+    _ = blocking { await stt.unload() }
+    var gone = false
+    for _ in 0..<100 where !gone { if let pid2, kill(pid2, 0) != 0 { gone = true } else { usleep(20_000) } }
+    check("unload ends the helper process", gone && (try? blocking { await stt.isLoaded }.get()) == false)
+    let missing = blocking { try await WhisperSTT(modelsDirectory: tmp, helperURL: tmp.appendingPathComponent("nope")).load() }
+    var isMissing = false
+    if case .failure(STTError.helperMissing) = missing { isMissing = true }
+    check("a missing helper is a clear error", isMissing)
+}
 
 print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
 exit(failures == 0 ? 0 : 1)

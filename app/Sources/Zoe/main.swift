@@ -149,24 +149,33 @@ if args.contains("--context-probe") {
 // MARK: - speech-to-text bench
 
 if let i = args.firstIndex(of: "--stt-bench") {
-    // Loads Whisper (timed), then transcribes a 16 kHz mono WAV if given. Prints time, CPU and peak RSS.
+    // Starts the Whisper helper and loads the model (timed), then transcribes a 16 kHz mono WAV if given:
+    // Whisper's time in the helper and the app's round trip. Prints the app's CPU and peak RSS and the
+    // helper's footprint (they count together: PLAN.md §12.2).
     let wav = i + 1 < args.count ? args[i + 1] : nil
     let done = DispatchSemaphore(value: 0)
     Task.detached {
         let stt = WhisperSTT()
         do {
             try await stt.load()
-            print(String(format: "load: %.0f ms", await stt.lastLoadMillis))
+            let (total, model) = (await stt.lastLoadMillis, await stt.lastModelLoadMillis)
+            print(String(format: "load: %.0f ms (helper start-up %.0f ms + model load %.0f ms)", total, total - model, model))
             if let wav {
                 let samples = try WAV.read16kMono(URL(fileURLWithPath: wav))
-                for n in 1...2 {
+                for n in 1...3 {
+                    let t0 = Date()
                     let r = try await stt.transcribe(samples)
-                    print(String(format: "transcribe #%d (%.2f s audio): %.0f ms: %@", n, Double(samples.count) / 16000, r.millis, r.text))
+                    let rt = Date().timeIntervalSince(t0) * 1000
+                    print(String(format: "transcribe #%d (%.2f s audio): Whisper %.0f ms, round trip %.0f ms: %@", n, Double(samples.count) / 16000, r.millis, rt, r.text))
                 }
             }
+            if let m = await stt.helperMemory() {
+                print(String(format: "helper: footprint %.0f MB, max RSS %.0f MB", m.footprintMB, m.maxRSSMB))
+            }
+            await stt.unload()
         } catch { print("error: \(error)") }
         var ru = rusage(); getrusage(RUSAGE_SELF, &ru)
-        print(String(format: "cpu %.2f s, max RSS %.0f MB", Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6, Double(ru.ru_maxrss) / 1048576))
+        print(String(format: "app: cpu %.2f s, max RSS %.0f MB", Double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + Double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6, Double(ru.ru_maxrss) / 1048576))
         done.signal()
     }
     done.wait()

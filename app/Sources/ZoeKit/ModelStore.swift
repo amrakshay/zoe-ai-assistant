@@ -11,7 +11,9 @@ public struct ModelFile: Sendable {
     /// Silero VAD v5 (MIT, snakers4/silero-vad), 16 kHz.
     public static let sileroVAD = ModelFile(
         name: "silero_vad.onnx",
-        url: URL(string: "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx")!,
+        // Pinned to a release tag, never `master`: upstream replaced the model in v6.3 (2026-11), which the
+        // checksum below rightly refused. v6.2–v6.2.3 serve the model Zoe was built and tested with.
+        url: URL(string: "https://github.com/snakers4/silero-vad/raw/v6.2.3/src/silero_vad/data/silero_vad.onnx")!,
         sha256: "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3")
 }
 
